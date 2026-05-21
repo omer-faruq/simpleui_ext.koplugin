@@ -1,0 +1,636 @@
+-- modules/module_hero_currently.lua — SimpleUI Extra Modules
+-- Hero Currently Reading card.
+--
+-- Displays the currently-reading book as a large hero card:
+--   • Book cover (left)
+--   • Title, author, description blurb, progress bar, page/time info (right)
+--
+-- Modelled after SimpleUI's module_currently.lua; uses the same shared
+-- helpers (module_books_shared, sui_config, sui_style, …).
+
+local Device          = require("device")
+local Screen          = Device.screen
+local Blitbuffer      = require("ffi/blitbuffer")
+local Font            = require("ui/font")
+local BottomContainer  = require("ui/widget/container/bottomcontainer")
+local FrameContainer   = require("ui/widget/container/framecontainer")
+local TopContainer     = require("ui/widget/container/topcontainer")
+local Geom             = require("ui/geometry")
+local GestureRange     = require("ui/gesturerange")
+local HorizontalGroup  = require("ui/widget/horizontalgroup")
+local HorizontalSpan   = require("ui/widget/horizontalspan")
+local InputContainer   = require("ui/widget/container/inputcontainer")
+local LineWidget       = require("ui/widget/linewidget")
+local OverlapGroup     = require("ui/widget/overlapgroup")
+local ProgressWidget   = require("ui/widget/progresswidget")
+local TextBoxWidget    = require("ui/widget/textboxwidget")
+local TextWidget       = require("ui/widget/textwidget")
+local VerticalGroup    = require("ui/widget/verticalgroup")
+local VerticalSpan     = require("ui/widget/verticalspan")
+local Size             = require("ui/size")
+local logger           = require("logger")
+
+-- ---------------------------------------------------------------------------
+-- Lazy-loaded SimpleUI helpers (not available until SimpleUI is loaded)
+-- ---------------------------------------------------------------------------
+local _SH, _Config, _SUISettings, _UI
+
+local function getSH()
+    if not _SH then
+        local ok, m = pcall(require, "desktop_modules/module_books_shared")
+        if ok and m then _SH = m else
+            logger.warn("simpleui_ext: hero_currently: cannot load module_books_shared")
+        end
+    end
+    return _SH
+end
+
+local function getConfig()
+    if not _Config then
+        local ok, m = pcall(require, "sui_config")
+        if ok and m then _Config = m end
+    end
+    return _Config
+end
+
+local function getSettings()
+    if not _SUISettings then
+        local ok, m = pcall(require, "sui_store")
+        if ok and m then _SUISettings = m end
+    end
+    return _SUISettings
+end
+
+local function getUI()
+    if not _UI then
+        local ok, m = pcall(require, "sui_core")
+        if ok and m then _UI = m end
+    end
+    return _UI
+end
+
+-- ---------------------------------------------------------------------------
+-- HTML stripping (book descriptions from EPUBs often contain markup)
+-- ---------------------------------------------------------------------------
+local function stripHTML(s)
+    if not s or s == "" then return nil end
+    -- Convert block-level tags to a space so words don't run together
+    s = s:gsub("<br%s*/?>",  " ")
+    s = s:gsub("<p[^>]*>",   " ")
+    s = s:gsub("</p>",       " ")
+    s = s:gsub("<div[^>]*>", " ")
+    s = s:gsub("</div>",     " ")
+    -- Strip remaining tags
+    s = s:gsub("<[^>]+>", "")
+    -- Decode common HTML entities
+    s = s:gsub("&amp;",  "&")
+    s = s:gsub("&lt;",   "<")
+    s = s:gsub("&gt;",   ">")
+    s = s:gsub("&quot;", '"')
+    s = s:gsub("&apos;", "'")
+    s = s:gsub("&nbsp;", " ")
+    s = s:gsub("&#(%d+);", function(n)
+        local cp = tonumber(n)
+        if cp and cp >= 32 and cp < 128 then return string.char(cp) end
+        return " "
+    end)
+    -- Collapse whitespace
+    s = s:gsub("%s+", " ")
+    s = s:gsub("^%s+", "")
+    s = s:gsub("%s+$", "")
+    return s ~= "" and s or nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Description reader — opens the book sidecar and returns the blurb string,
+-- or nil when absent.  Tries custom_metadata.lua overrides first.
+-- ---------------------------------------------------------------------------
+local function getBookDescription(fp)
+    if not fp then return nil end
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs or lfs.attributes(fp, "mode") ~= "file" then return nil end
+
+    local raw
+
+    -- 1) DocSettings custom_metadata.lua — highest priority (user edits)
+    local ok_ds, DS = pcall(require, "docsettings")
+    if ok_ds and DS then
+        local ok3, custom_file = pcall(DS.findCustomMetadataFile, DS, fp)
+        if ok3 and custom_file then
+            local ok4, cs = pcall(DS.openSettingsFile, custom_file)
+            if ok4 and cs then
+                local cp = cs:readSetting("custom_props") or {}
+                raw = cp.description or cp.comments
+            end
+        end
+    end
+
+    -- 2) BookInfoManager (BIM) — populated by the CoverBrowser book scanner;
+    --    the richest source for description / comments on most EPUB/CBZ books.
+    --    Use Config.getBookInfoManager() so the same two-path fallback that
+    --    SimpleUI and Bookshelf use is applied (plain require → coverbrowser
+    --    plugin path), instead of only trying the plain require.
+    if not raw then
+        local ok_cfg, Config = pcall(require, "sui_config")
+        local BIM = ok_cfg and Config and Config.getBookInfoManager()
+        if BIM then
+            local ok_i, info = pcall(BIM.getBookInfo, BIM, fp, false)
+            if ok_i and info then
+                raw = (type(info.description) == "string" and info.description ~= "" and info.description)
+                   or (type(info.comments)    == "string" and info.comments    ~= "" and info.comments)
+            end
+        end
+    end
+
+    -- 3) DocSettings sidecar doc_props — fallback when BIM has no entry yet
+    if not raw and ok_ds and DS then
+        local ok2, ds = pcall(DS.open, DS, fp)
+        if ok2 and ds then
+            local rp = ds:readSetting("doc_props") or {}
+            raw = rp.description or rp.comments
+            pcall(function() ds:close() end)
+        end
+    end
+
+    return raw and stripHTML(raw)
+end
+
+-- ---------------------------------------------------------------------------
+-- Stats DB: avg reading time per page (same query as module_currently)
+-- ---------------------------------------------------------------------------
+local _MAX_TIME_PER_PAGE = 180  -- seconds per page cap (matches module_currently)
+local function fetchAvgTimeFromDB(md5, db_conn)
+    if not md5 or not db_conn then return nil end
+    local result = nil
+    pcall(function()
+        local row = db_conn:exec(string.format([[
+            WITH b AS (SELECT id FROM book WHERE md5 = %q LIMIT 1),
+            ps_agg AS (
+                SELECT ps.page, sum(ps.duration) AS page_dur
+                FROM page_stat ps
+                WHERE ps.id_book = (SELECT id FROM b)
+                GROUP BY ps.page
+            )
+            SELECT sum(min(page_dur, %d)), count(*)
+            FROM ps_agg;
+        ]], md5, _MAX_TIME_PER_PAGE))
+        if row and row[1] and row[1][1] then
+            local capped = tonumber(row[1][1]) or 0
+            local pages  = tonumber(row[2] and row[2][1]) or 0
+            if pages > 0 and capped > 0 then
+                result = capped / pages
+            end
+        end
+    end)
+    return result
+end
+
+-- ---------------------------------------------------------------------------
+-- Base dimensions (100% scale reference values)
+-- ---------------------------------------------------------------------------
+-- Hero cover: proportional — 30% of content width, 3:2 aspect ratio.
+-- Actual COVER_W / COVER_H computed in build() from the passed 'w' argument.
+local _BASE_COVER_GAP  = Screen:scaleBySize(12)
+local _BASE_TITLE_FS   = Screen:scaleBySize(13)
+local _BASE_AUTHOR_FS  = Screen:scaleBySize(9)   -- matches bookshelf author (16pt)
+local _BASE_DESC_FS    = Screen:scaleBySize(8)   -- smaller than author (bookshelf desc=14pt < author=16pt)
+local _BASE_PROG_FS    = 14                      -- bookshelf: font_size=14 (raw, no scaleBySize); bar_height = face.size
+local _BASE_TITLE_GAP  = Screen:scaleBySize(2)
+local _BASE_AUTHOR_GAP = Screen:scaleBySize(4)
+local _BASE_DESC_GAP   = Screen:scaleBySize(6)
+
+-- Setting keys (prepended with pfx at runtime)
+local SCALE_KEY = "hero_currently_scale"
+
+-- ---------------------------------------------------------------------------
+-- Module table
+-- ---------------------------------------------------------------------------
+local M = {}
+
+M.id          = "hero_currently"
+M.name        = "Hero Currently Reading"
+M.label       = "Currently Reading"
+M.enabled_key = "hero_currently"
+M.default_on  = false
+M.has_covers  = true    -- activates e-ink dithering and cover poll
+M.is_book_mod = true    -- suppresses "No books opened yet" empty-state
+-- Declare DB need so the homescreen opens a stats connection when we are active.
+M.needs       = { db = true }
+
+-- Called by the homescreen on hot-reload to drop cached references
+function M.reset()
+    _SH = nil
+end
+
+-- ---------------------------------------------------------------------------
+-- _getCurrentFP(ctx) — returns the currently-reading filepath.
+--
+-- ctx.current_fp is only populated by the homescreen when the built-in
+-- "currently" module is also enabled.  When it is off (the common case
+-- when using this module as a standalone replacement) we fall back to
+-- ReadHistory.hist[1] — the most recently opened book — which is already
+-- in memory and requires no file I/O.
+-- ---------------------------------------------------------------------------
+local function _getCurrentFP(ctx)
+    if ctx.current_fp then return ctx.current_fp end
+    local ok, RH = pcall(require, "readhistory")
+    if not ok or not RH then return nil end
+    if not (RH.hist and #RH.hist > 0) then
+        pcall(function() RH:reload() end)
+    end
+    local entry = RH.hist and RH.hist[1]
+    return entry and entry.file
+end
+
+-- ---------------------------------------------------------------------------
+-- build(w, ctx) → widget | nil
+--
+-- Layout mirrors bookshelf's hero card architecture:
+--   cover (left, full COVER_H) | right column (OverlapGroup):
+--       TopContainer    → right_top:    title, author, [description fills slack]
+--       BottomContainer → right_bottom: "p.73 [████░░] 3h 27m left"
+-- ---------------------------------------------------------------------------
+function M.build(w, ctx)
+    local Config   = getConfig()
+    local Settings = getSettings()
+    local UI       = getUI()
+    local SH       = getSH()
+    if not Config or not Settings or not UI or not SH then return nil end
+
+    Config.applyLabelToggle(M, M.label)
+
+    local fp = _getCurrentFP(ctx)
+    if not fp then return nil end
+
+    local pfx   = ctx.pfx or ""
+    local scale = Config.getModuleScale("hero_currently", pfx)
+    local PAD   = UI.PAD
+
+    local COVER_W = math.floor(w * 0.30)      -- bookshelf: hero_cover_w = content_w * 0.30
+    local COVER_H = math.floor(COVER_W * 1.5)  -- bookshelf: hero_cover_h = hero_cover_w * 1.5
+
+    local cover_gap  = math.max(0, math.floor(_BASE_COVER_GAP  * scale))
+    local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale))
+    local author_fs  = math.max(7, math.floor(_BASE_AUTHOR_FS  * scale))
+    local desc_fs    = math.max(7, math.floor(_BASE_DESC_FS    * scale))
+    local prog_fs    = math.max(7, math.floor(_BASE_PROG_FS    * scale))
+    local bar_h      = prog_fs  -- bookshelf: bar_height = 100% of face.size
+    local title_gap  = math.max(1, math.floor(_BASE_TITLE_GAP  * scale))
+    local author_gap = math.max(1, math.floor(_BASE_AUTHOR_GAP * scale))
+    local desc_gap   = math.max(1, math.floor(_BASE_DESC_GAP   * scale))
+
+    local face_title  = Font:getFace("smallinfofont", title_fs)
+    local face_author = Font:getFace("smallinfofont", author_fs)
+    local face_desc   = Font:getFace("smallinfofont", desc_fs)
+    local face_prog   = Font:getFace("smallinfofont", prog_fs)
+
+    local prefetched = ctx.prefetched and ctx.prefetched[fp]
+    local bd         = SH.getBookData(fp, prefetched)
+
+    -- Cover — may be replaced by updateCovers() asynchronously
+    local cover = SH.getBookCover(fp, COVER_W, COVER_H, nil, 0.10)
+                  or SH.coverPlaceholder(bd.title, bd.authors, COVER_W, COVER_H)
+
+    local desc_text = getBookDescription(fp)
+
+    -- Colour theme
+    local CLR_TEXT = Blitbuffer.COLOR_BLACK
+    local CLR_SUB  = UI.CLR_TEXT_SUB or Blitbuffer.gray(0.45)
+    local ok_ss, SUIStyle = pcall(require, "sui_style")
+    if ok_ss and SUIStyle then
+        CLR_TEXT = SUIStyle.getThemeColor("fg")              or CLR_TEXT
+        CLR_SUB  = SUIStyle.getThemeColor("text_secondary")
+                   or SUIStyle.getThemeColor("fg")           or CLR_SUB
+    end
+
+    -- Text column width
+    local tw = w - PAD - COVER_W - cover_gap - PAD
+
+    -- ── right_top: title + author (description added below after measuring) ──
+    local right_top = VerticalGroup:new{ align = "left" }
+
+    right_top[#right_top + 1] = TextBoxWidget:new{
+        text      = bd.title or "?",
+        face      = face_title,
+        width     = tw,
+        alignment = "left",
+        max_lines = 2,
+        fgcolor   = CLR_TEXT,
+        bold      = true,
+    }
+    if bd.authors and bd.authors ~= "" then
+        right_top[#right_top + 1] = VerticalSpan:new{ width = author_gap }
+        right_top[#right_top + 1] = TextWidget:new{
+            text    = bd.authors,
+            face    = face_author,
+            fgcolor = CLR_SUB,
+        }
+    end
+
+    -- ── right_bottom: single progress row, bottom-anchored ───────────────────
+    -- Mirrors bookshelf template: "73 / 272  [elastic bar]  3h 27m left"
+    -- bar_h = prog_fs  (bookshelf bar_height = 100% of face.size)
+    local right_bottom = VerticalGroup:new{ align = "left" }
+    local pct = bd.percent or 0
+
+    -- Get book MD5 for Stats DB query (more accurate avg_time than DocSettings)
+    local book_md5 = prefetched and prefetched.partial_md5_checksum
+    if not book_md5 and ctx.db_conn then
+        local ok_ds, DS = pcall(require, "docsettings")
+        if ok_ds and DS then
+            local ok2, ds = pcall(DS.open, DS, fp)
+            if ok2 and ds then
+                book_md5 = ds:readSetting("partial_md5_checksum")
+                pcall(function() ds:close() end)
+            end
+        end
+    end
+
+    -- avg_time: prefer Stats DB (capped per-page) over DocSettings totals
+    local avg_time = nil
+    if book_md5 and ctx.db_conn then
+        avg_time = fetchAvgTimeFromDB(book_md5, ctx.db_conn)
+    end
+    if not avg_time or avg_time <= 0 then avg_time = bd.avg_time end
+
+    local prog_left, prog_right
+    if bd.pages and bd.pages > 0 then
+        local cur  = math.floor(pct * bd.pages)
+        prog_left  = string.format("%d / %d", cur, bd.pages)  -- no "p." prefix (matches bookshelf)
+        local tl   = SH.formatTimeLeft(pct, bd.pages, avg_time)
+        if tl then prog_right = tl .. " left" end
+    else
+        prog_left = string.format("%.0f%%", pct * 100)
+    end
+
+    -- Bold TextWidgets (bookshelf progress region: bold = true)
+    local lw    = TextWidget:new{ text = prog_left,  face = face_prog, fgcolor = CLR_SUB, bold = true }
+    local rw    = prog_right and TextWidget:new{ text = prog_right, face = face_prog, fgcolor = CLR_SUB, bold = true }
+    local lw_w  = lw:getSize().w
+    local rw_w  = rw and rw:getSize().w or 0
+    -- Bookshelf uses two literal spaces as gap (Size.padding.small * 2 ≈ that)
+    local pad_s = Size.padding.small * 2
+    local bar_w = math.max(1, tw - lw_w - rw_w
+                              - (lw_w > 0 and pad_s or 0)
+                              - (rw_w > 0 and pad_s or 0))
+
+    local inline_bar = ProgressWidget:new{
+        width      = bar_w,
+        height     = bar_h,
+        percentage = math.min(pct, 1.0),
+        style      = "bordered",  -- matches bookshelf bar_style = "bordered"
+        ticks      = nil,
+        last       = nil,
+    }
+    local prog_row = HorizontalGroup:new{ align = "center" }
+    prog_row[#prog_row + 1] = lw
+    prog_row[#prog_row + 1] = HorizontalSpan:new{ width = pad_s }
+    prog_row[#prog_row + 1] = inline_bar
+    if rw then
+        prog_row[#prog_row + 1] = HorizontalSpan:new{ width = pad_s }
+        prog_row[#prog_row + 1] = rw
+    end
+    right_bottom[#right_bottom + 1] = prog_row
+
+    -- ── Description: fills the slack between right_top and right_bottom ──────
+    -- Matches bookshelf's dynamic layout: measure top_used + bottom_h at
+    -- runtime, give description every remaining pixel, split on \n\n paragraphs.
+    if desc_text then
+        right_top[#right_top + 1] = VerticalSpan:new{ width = desc_gap }
+        local top_used = 0
+        for i = 1, #right_top do
+            local g = right_top[i]:getSize()
+            top_used = top_used + (g and g.h or 0)
+        end
+        local bottom_h  = right_bottom:getSize().h
+        local breath    = Size.padding.default
+        local available = COVER_H - top_used - bottom_h - breath
+
+        if available > face_desc.size then
+            -- Normalise line-endings; collapse blank/whitespace-only lines to \n\n
+            desc_text = desc_text:gsub("\r\n", "\n"):gsub("\n%s*\n", "\n\n")
+            desc_text = desc_text:match("^%s*(.-)%s*$") or desc_text
+
+            local para_gap   = math.floor(face_desc.size * 0.4)
+            local paragraphs = {}
+            for para in (desc_text .. "\n\n"):gmatch("(.-)\n\n") do
+                if para ~= "" then paragraphs[#paragraphs + 1] = para end
+            end
+            if #paragraphs == 0 then paragraphs[1] = desc_text end
+
+            local desc_group = VerticalGroup:new{ align = "left" }
+            local total_h    = 0
+            for i, ptext in ipairs(paragraphs) do
+                local gap = (i > 1) and para_gap or 0
+                if total_h + gap >= available then break end
+                local rem = available - total_h - gap
+                if rem < face_desc.size then break end
+                if gap > 0 then
+                    desc_group[#desc_group + 1] = VerticalSpan:new{ width = gap }
+                    total_h = total_h + gap
+                end
+                local pwid = TextBoxWidget:new{
+                    text                          = ptext,
+                    face                          = face_desc,
+                    width                         = tw,
+                    height                        = rem,
+                    alignment                     = "left",
+                    height_overflow_show_ellipsis = true,
+                    height_adjust                 = true,
+                    line_height                   = 0.3,
+                    fgcolor                       = CLR_SUB,
+                }
+                desc_group[#desc_group + 1] = pwid
+                total_h = total_h + pwid:getSize().h
+            end
+            if #desc_group > 0 then
+                right_top[#right_top + 1] = desc_group
+            end
+        end
+    end
+
+    -- ── Assemble right column ─────────────────────────────────────────────────
+    -- OverlapGroup: right_top pinned to top, right_bottom pinned to bottom.
+    -- The right column is always exactly COVER_H tall — no "max(cover, text)"
+    -- needed because description fills every available pixel of the slack.
+    local rd = Geom:new{ w = tw, h = COVER_H }
+    local right_col = FrameContainer:new{
+        bordersize = 0,
+        padding    = 0,
+        width      = tw,
+        height     = COVER_H,
+        OverlapGroup:new{
+            dimen = rd,
+            TopContainer:new{    dimen = rd, right_top    },
+            BottomContainer:new{ dimen = rd, right_bottom },
+        },
+    }
+
+    -- ── Frame / background ────────────────────────────────────────────────────
+    local show_frame = Settings:isTrue(pfx .. "hero_currently_show_frame")
+    local solid_bg   = Settings:isTrue(pfx .. "hero_currently_solid_bg")
+    local has_box    = show_frame or solid_bg
+    local border_sz  = show_frame and Size.border.thin or 0
+    local radius     = has_box and math.floor(Screen:scaleBySize(12) * scale) or 0
+    local border_clr = Blitbuffer.gray(0.72)
+    local bg_color   = nil
+    if ok_ss and SUIStyle then
+        border_clr = SUIStyle.getThemeColor("separator") or border_clr
+    end
+    if solid_bg then
+        bg_color = (ok_ss and SUIStyle and SUIStyle.getThemeColor("bg"))
+                   or Blitbuffer.COLOR_WHITE
+    end
+
+    -- cover_frame holds cover at [1] so updateCovers() can swap it
+    local cover_frame = FrameContainer:new{
+        bordersize    = 0,
+        padding       = 0,
+        padding_right = cover_gap,
+        cover,
+    }
+
+    local row = HorizontalGroup:new{
+        align = "top",
+        cover_frame,
+        right_col,
+    }
+
+    local content_h = COVER_H  -- right column is always exactly COVER_H
+    local full_h    = content_h + (has_box and PAD * 2 or 0)
+
+    local tappable = InputContainer:new{
+        dimen    = Geom:new{ w = w, h = full_h },
+        _fp      = fp,
+        _open_fn = ctx.open_fn,
+        [1] = FrameContainer:new{
+            bordersize     = border_sz,
+            radius         = radius,
+            color          = border_clr,
+            background     = bg_color,
+            padding        = 0,
+            padding_left   = PAD,
+            padding_right  = PAD,
+            padding_top    = has_box and PAD or 0,
+            padding_bottom = has_box and PAD or 0,
+            row,
+        },
+    }
+    tappable.ges_events = {
+        TapBook = {
+            GestureRange:new{
+                ges   = "tap",
+                range = function() return tappable.dimen end,
+            },
+        },
+    }
+    tappable._cover_slots = {
+        { container = cover_frame, idx = 1,
+          fp = fp, w = COVER_W, h = COVER_H,
+          align = nil, stretch = 0.10 },
+    }
+    function tappable:onTapBook()
+        if self._open_fn then self._open_fn(self._fp) end
+        return true
+    end
+
+    -- Keyboard focus: border overlay
+    if ctx.kb_currently_focused then
+        local bw = Screen:scaleBySize(3)
+        return OverlapGroup:new{
+            dimen = Geom:new{ w = w, h = full_h },
+            tappable,
+            LineWidget:new{ dimen = Geom:new{ w = w,  h = bw }, background = CLR_TEXT },
+            LineWidget:new{ dimen = Geom:new{ w = w,  h = bw }, background = CLR_TEXT, overlap_offset = { 0, full_h - bw } },
+            LineWidget:new{ dimen = Geom:new{ w = bw, h = full_h }, background = CLR_TEXT },
+            LineWidget:new{ dimen = Geom:new{ w = bw, h = full_h }, background = CLR_TEXT, overlap_offset = { w - bw, 0 } },
+        }
+    end
+
+    return tappable
+end
+
+-- ---------------------------------------------------------------------------
+-- updateCovers(widget, ctx) — swap cover images asynchronously
+-- ---------------------------------------------------------------------------
+function M.updateCovers(widget, _ctx)
+    -- Widget may be wrapped in an OverlapGroup (kb focus)
+    local tappable = widget._cover_slots and widget
+                     or (widget[1] and widget[1]._cover_slots and widget[1])
+    if not tappable or not tappable._cover_slots then return true end
+
+    local SH     = getSH()
+    local Config = getConfig()
+    if not SH then return true end
+
+    local all_done = true
+    for _, slot in ipairs(tappable._cover_slots) do
+        local new_cover = SH.getBookCover(slot.fp, slot.w, slot.h, slot.align, slot.stretch)
+        if new_cover then
+            slot.container[slot.idx] = new_cover
+        elseif Config and not Config.isCoverMissing(slot.fp) then
+            all_done = false
+        end
+    end
+    return all_done
+end
+
+-- ---------------------------------------------------------------------------
+-- getHeight(ctx) → number  (includes section-label height)
+-- ---------------------------------------------------------------------------
+function M.getHeight(ctx)
+    local Config   = getConfig()
+    local Settings = getSettings()
+    local UI       = getUI()
+    if not Config or not UI then
+        return Screen:scaleBySize(160)
+    end
+
+    local pfx   = ctx and ctx.pfx or ""
+    local scale = Config.getModuleScale("hero_currently", pfx)
+    local PAD   = UI.PAD
+
+    -- Right column height = cover height = 30% of content width × 1.5
+    local approx_content_w = Screen:getWidth() - PAD * 2
+    local content_h = math.floor(approx_content_w * 0.30 * 1.5)
+
+    local show_frame = Settings and Settings:isTrue(pfx .. "hero_currently_show_frame")
+    local solid_bg   = Settings and Settings:isTrue(pfx .. "hero_currently_solid_bg")
+    if show_frame or solid_bg then
+        content_h = content_h + PAD * 2
+    end
+
+    return Config.getScaledLabelH() + content_h
+end
+
+-- ---------------------------------------------------------------------------
+-- getMenuItems(ctx_menu) → table  (settings entries for the Arrange screen)
+-- ---------------------------------------------------------------------------
+function M.getMenuItems(ctx_menu)
+    local Config = getConfig()
+    if not Config then return nil end
+
+    local pfx     = ctx_menu.pfx
+    local refresh = ctx_menu.refresh
+    local _lc     = ctx_menu._ or function(x) return x end
+
+    return {
+        Config.makeLabelToggleItem(M.id, M.name, refresh, _lc),
+        Config.makeScaleItem({
+            text_func    = function()
+                local pct = Config.getModuleScalePct("hero_currently", pfx)
+                return pct == 100
+                    and _lc("Scale")
+                    or  string.format("%s (%d%%)", _lc("Scale"), pct)
+            end,
+            enabled_func = function() return not Config.isScaleLinked() end,
+            title        = _lc("Scale"),
+            info         = _lc("Scale for this module.\n100% is the default size."),
+            get          = function() return Config.getModuleScalePct("hero_currently", pfx) end,
+            set          = function(v) Config.setModuleScale(v, "hero_currently", pfx) end,
+            refresh      = refresh,
+        }),
+    }
+end
+
+return M
