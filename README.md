@@ -112,6 +112,6 @@ The module must follow [SimpleUI's module contract](https://github.com/doctorhet
 ## Credits
 
 - **[Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation. Bookshelf is the original source of this visual design.
-- **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugini)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
+- **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
 - **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI. 
 
