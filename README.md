@@ -105,13 +105,13 @@ The plugin is designed to be extended. To add a new SimpleUI-compatible module:
 2. Add `"modules/module_yourname"` to the `MODULES` table in `main.lua`.
 3. Restart KOReader.
 
-The module must follow [SimpleUI's module contract](https://github.com/jospalau/simpleui) (`id`, `name`, `label`, `enabled_key`, `build(w, ctx)`, `getHeight(ctx)`, …).
+The module must follow [SimpleUI's module contract](https://github.com/doctorhetfield-cmd/simpleui.koplugin) (`id`, `name`, `label`, `enabled_key`, `build(w, ctx)`, `getHeight(ctx)`, …).
 
 ---
 
 ## Credits
 
-- **[Bookshelf plugin](https://github.com/jospalau/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation. Bookshelf is the original source of this visual design.
-- **[SimpleUI plugin](https://github.com/jospalau/simpleui)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
+- **[Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation. Bookshelf is the original source of this visual design.
+- **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugini)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
 - **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI. 
 
