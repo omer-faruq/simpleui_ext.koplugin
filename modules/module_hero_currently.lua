@@ -309,7 +309,7 @@ function M.build(w, ctx)
     -- ── right_top: title + author (description added below after measuring) ──
     local right_top = VerticalGroup:new{ align = "left" }
 
-    right_top[#right_top + 1] = TextBoxWidget:new{
+    local title_args = {
         text      = bd.title or "?",
         face      = face_title,
         width     = tw,
@@ -318,6 +318,8 @@ function M.build(w, ctx)
         fgcolor   = CLR_TEXT,
         bold      = true,
     }
+    right_top[#right_top + 1] = (ctx.has_wallpaper and UI and UI.makeAlphaTextBox(title_args))
+                                  or TextBoxWidget:new(title_args)
     if bd.authors and bd.authors ~= "" then
         right_top[#right_top + 1] = VerticalSpan:new{ width = author_gap }
         right_top[#right_top + 1] = TextWidget:new{
@@ -429,17 +431,19 @@ function M.build(w, ctx)
                     desc_group[#desc_group + 1] = VerticalSpan:new{ width = gap }
                     total_h = total_h + gap
                 end
-                local pwid = TextBoxWidget:new{
-                    text                          = ptext,
-                    face                          = face_desc,
-                    width                         = tw,
-                    height                        = rem,
-                    alignment                     = "left",
+                local desc_args = {
+                    text        = ptext,
+                    face        = face_desc,
+                    width       = tw,
+                    height      = rem,
+                    alignment   = "left",
                     height_overflow_show_ellipsis = true,
                     height_adjust                 = true,
-                    line_height                   = 0.3,
-                    fgcolor                       = CLR_SUB,
+                    line_height = 0.3,
+                    fgcolor     = CLR_SUB,
                 }
+                local pwid = (ctx.has_wallpaper and UI and UI.makeAlphaTextBox(desc_args))
+                              or TextBoxWidget:new(desc_args)
                 desc_group[#desc_group + 1] = pwid
                 total_h = total_h + pwid:getSize().h
             end
@@ -454,16 +458,10 @@ function M.build(w, ctx)
     -- The right column is always exactly COVER_H tall — no "max(cover, text)"
     -- needed because description fills every available pixel of the slack.
     local rd = Geom:new{ w = tw, h = COVER_H }
-    local right_col = FrameContainer:new{
-        bordersize = 0,
-        padding    = 0,
-        width      = tw,
-        height     = COVER_H,
-        OverlapGroup:new{
-            dimen = rd,
-            TopContainer:new{    dimen = rd, right_top    },
-            BottomContainer:new{ dimen = rd, right_bottom },
-        },
+    local right_col = OverlapGroup:new{
+        dimen = rd,
+        TopContainer:new{    dimen = rd, right_top    },
+        BottomContainer:new{ dimen = rd, right_bottom },
     }
 
     -- ── Frame / background ────────────────────────────────────────────────────
@@ -473,7 +471,7 @@ function M.build(w, ctx)
     local border_sz  = show_frame and Size.border.thin or 0
     local radius     = has_box and math.floor(Screen:scaleBySize(12) * scale) or 0
     local border_clr = Blitbuffer.gray(0.72)
-    local bg_color   = nil
+    local bg_color   = false  -- transparent by default; wallpaper shows through
     if ok_ss and SUIStyle then
         border_clr = SUIStyle.getThemeColor("separator") or border_clr
     end
@@ -483,11 +481,10 @@ function M.build(w, ctx)
     end
 
     -- cover_frame holds cover at [1] so updateCovers() can swap it
-    local cover_frame = FrameContainer:new{
-        bordersize    = 0,
-        padding       = 0,
-        padding_right = cover_gap,
+    local cover_frame = HorizontalGroup:new{
+        align = "top",
         cover,
+        HorizontalSpan:new{ width = cover_gap },
     }
 
     local row = HorizontalGroup:new{
@@ -610,9 +607,27 @@ function M.getMenuItems(ctx_menu)
     local Config = getConfig()
     if not Config then return nil end
 
-    local pfx     = ctx_menu.pfx
-    local refresh = ctx_menu.refresh
-    local _lc     = ctx_menu._ or function(x) return x end
+    local pfx      = ctx_menu.pfx
+    local refresh  = ctx_menu.refresh
+    local _lc      = ctx_menu._ or function(x) return x end
+    local Settings = getSettings()
+
+    local function toggle_item(label, key)
+        return {
+            text_func      = function() return _lc(label) end,
+            checked_func   = function()
+                return Settings and Settings:isTrue(pfx .. key)
+            end,
+            keep_menu_open = true,
+            callback       = function()
+                if Settings then
+                    Settings:saveSetting(pfx .. key,
+                        not (Settings:isTrue(pfx .. key)))
+                end
+                refresh()
+            end,
+        }
+    end
 
     return {
         Config.makeLabelToggleItem(M.id, M.name, refresh, _lc),
@@ -630,6 +645,8 @@ function M.getMenuItems(ctx_menu)
             set          = function(v) Config.setModuleScale(v, "hero_currently", pfx) end,
             refresh      = refresh,
         }),
+        toggle_item("Show Frame",        "hero_currently_show_frame"),
+        toggle_item("Solid Background",  "hero_currently_solid_bg"),
     }
 end
 
