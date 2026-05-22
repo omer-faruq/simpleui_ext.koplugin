@@ -448,7 +448,42 @@ function M.build(w, ctx)
                 total_h = total_h + pwid:getSize().h
             end
             if #desc_group > 0 then
-                right_top[#right_top + 1] = desc_group
+                -- Tappable wrapper: tapping the description opens the full
+                -- text in a scrollable viewer, mirroring bookshelf's
+                -- on_description_tap / DescTap pattern. Consuming the tap
+                -- here prevents the cover's open-book zone from firing.
+                local DescTap = InputContainer:extend{}
+                local _full_desc  = desc_text
+                local _book_title  = bd.title or ""
+                local _book_author = bd.authors
+                function DescTap:onTap()
+                    local TextViewer = require("ui/widget/textviewer")
+                    local UIManager  = require("ui/uimanager")
+                    local title = _book_title
+                    if _book_author and _book_author ~= "" then
+                        title = title .. " \xE2\x80\x94 " .. _book_author
+                    end
+                    local viewer = TextViewer:new{
+                        title = title,
+                        text  = _full_desc,
+                    }
+                    UIManager:show(viewer)
+                    return true
+                end
+                local desc_size = desc_group:getSize()
+                local dtap_h    = desc_size and desc_size.h or 0
+                if dtap_h > 0 then
+                    local dtap = DescTap:new{
+                        dimen = Geom:new{ w = tw, h = dtap_h },
+                        desc_group,
+                    }
+                    dtap.ges_events = {
+                        Tap = { GestureRange:new{ ges = "tap", range = dtap.dimen } },
+                    }
+                    right_top[#right_top + 1] = dtap
+                else
+                    right_top[#right_top + 1] = desc_group
+                end
             end
         end
     end
@@ -480,10 +515,27 @@ function M.build(w, ctx)
                    or Blitbuffer.COLOR_WHITE
     end
 
-    -- cover_frame holds cover at [1] so updateCovers() can swap it
+    -- cover_tap wraps the cover image with a Tap zone that opens the book.
+    -- Only the cover opens the book; the description has its own tap zone.
+    -- cover_tap holds the actual cover image at [1] so updateCovers() can
+    -- swap it without touching the surrounding layout.
+    local CoverTap = InputContainer:extend{}
+    local _open_fn_ref = ctx.open_fn
+    local _fp_ref      = fp
+    function CoverTap:onTap()
+        if _open_fn_ref then _open_fn_ref(_fp_ref) end
+        return true
+    end
+    local cover_tap = CoverTap:new{
+        dimen = Geom:new{ w = COVER_W, h = COVER_H },
+        cover,
+    }
+    cover_tap.ges_events = {
+        Tap = { GestureRange:new{ ges = "tap", range = cover_tap.dimen } },
+    }
     local cover_frame = HorizontalGroup:new{
         align = "top",
-        cover,
+        cover_tap,
         HorizontalSpan:new{ width = cover_gap },
     }
 
@@ -513,23 +565,14 @@ function M.build(w, ctx)
             row,
         },
     }
-    tappable.ges_events = {
-        TapBook = {
-            GestureRange:new{
-                ges   = "tap",
-                range = function() return tappable.dimen end,
-            },
-        },
-    }
+    -- No whole-card tap gesture: only the cover (cover_tap) opens the book
+    -- and the description (DescTap) opens the viewer. All other taps fall
+    -- through; this matches bookshelf's HeroCard interaction model.
     tappable._cover_slots = {
-        { container = cover_frame, idx = 1,
+        { container = cover_tap, idx = 1,
           fp = fp, w = COVER_W, h = COVER_H,
           align = nil, stretch = 0.10 },
     }
-    function tappable:onTapBook()
-        if self._open_fn then self._open_fn(self._fp) end
-        return true
-    end
 
     -- Keyboard focus: border overlay
     if ctx.kb_currently_focused then
