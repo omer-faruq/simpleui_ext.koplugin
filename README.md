@@ -2,7 +2,7 @@
 
 Extra homescreen modules for SimpleUI on KOReader.
 
-Currently includes one module: **Hero Currently Reading** — a large, bookshelf-style hero card that displays your currently-reading book with cover art, title, author, description blurb, and a progress bar with estimated time remaining.
+Modules are **auto-discovered**: drop any `module_*.lua` file into the `modules/` folder and it will be picked up automatically on the next KOReader start — no changes to `main.lua` needed.
 
 ---
 
@@ -10,7 +10,7 @@ Currently includes one module: **Hero Currently Reading** — a large, bookshelf
 
 ### Hero Currently Reading
 
-Displays the most recently opened book as a full-width hero card, mirroring the layout used by the Bookshelf plugin:
+Displays the most recently opened book as a full-width hero card, mirroring the layout used by the  Bookshelf plugin:
 
 ```
 ┌───────────────────────────────────────────────────────┐
@@ -25,12 +25,50 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
 ```
 
 **Features:**
-- Cover image (30% of card width, 3:2 aspect ratio — bookshelf proportions)
+- Cover image (30 % of card width, 3:2 aspect ratio — bookshelf proportions)
 - Title (bold, up to 2 lines) and author
 - Description blurb pulled from BookInfoManager / DocSettings / custom metadata
 - Progress bar with page count and estimated time remaining (sourced from the Statistics plugin database)
 - Tap to open the book
 - Supports SimpleUI's module scaling, theme colours, and frame/background options
+
+**Settings (via Arrange Modules):**
+
+| Setting | Description |
+|---|---|
+| Scale | Resize the card proportionally |
+| Show Frame | Draw a thin border around the card |
+| Solid Background | Fill the card background with the theme background colour |
+
+---
+
+### Recent Book Stats
+
+Displays reading statistics for the most recently opened book in a compact two-panel card, mirroring the layout of the built-in *Reading Stats Popup*:
+
+```
+┌─────────────────────┬──────────────────────┐
+│ BOOK: The Name of…  │ PACE                 │
+│  73%   │  199 pg    │  14d   │   6d        │
+│  2h    │  5h to go  │  45m   │  0.8 pg/min │
+└─────────────────────┴──────────────────────┘
+```
+
+**Features:**
+- **BOOK panel** — progress %, pages read, time spent, estimated time remaining
+- **PACE panel** — days reading, estimated days to finish, avg time per day, pages per minute
+- Book title embedded in the BOOK header (pixel-accurate truncation with ellipsis)
+- Tap to open the book
+- Wallpaper-aware: all text areas transparent, headers show a solid underline instead of a filled background
+- 60-second cache per book to avoid repeated database queries
+- Uses the shared Statistics plugin DB connection when available (`M.needs = { db = true }`)
+
+**Settings (via Arrange Modules):**
+
+| Setting | Description |
+|---|---|
+| Scale | Resize the card proportionally |
+| Tap to Open Book | Tapping the card opens the most recently read book |
 
 ---
 
@@ -40,8 +78,8 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
 |---|---|
 | **KOReader** | Any recent build |
 | **SimpleUI plugin** | Required — this plugin extends SimpleUI's homescreen |
-| **Statistics plugin** | Optional — enables the time-remaining estimate |
-| **CoverBrowser / Bookshelf** | Optional — richer book descriptions |
+| **Statistics plugin** | Optional — enables the time-remaining estimate in Hero Currently Reading |
+| **CoverBrowser / Bookshelf** | Optional — richer book descriptions in Hero Currently Reading |
 
 ---
 
@@ -65,45 +103,34 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
        ├── _meta.lua
        ├── main.lua
        └── modules/
-           └── module_hero_currently.lua
+           ├── module_hero_currently.lua
+           └── module_recent_book_stats.lua
    ```
 
 3. **Restart KOReader** (or use *Top Menu → Settings → Start fresh*).
 
-4. SimpleUI will automatically detect and register the new modules on startup.
+4. SimpleUI will automatically detect and register all modules on startup.
 
 ---
 
 ## Usage
 
-### Enabling the module
+### Enabling a module
 
 1. Open KOReader and go to the **SimpleUI homescreen**.
 2. Tap the top bar to open the SimpleUI menu.
 3. Go to **Arrange Modules** (or the homescreen layout editor).
-4. Find **"Hero Currently Reading"** in the list and enable it.
-5. Drag it to the desired position on the homescreen.
-6. Tap **Save** and return to the homescreen.
-
-### What is shown
-
-- The **most recently opened book** is displayed. If SimpleUI's built-in *Currently Reading* module is also active, both will share the same book.
-- The **progress bar** shows current page / total pages on the left, and estimated time remaining on the right. Time remaining is calculated from the Statistics plugin's per-page reading history (capped at 3 minutes/page to avoid outliers).
-- If no reading time data is available yet, only the page count is shown.
-
-### Scaling
-
-The module respects SimpleUI's per-module scale factor. Adjust it in the module settings to make the card larger or smaller. The cover size always stays at 30% of the card width regardless of scale; font sizes scale proportionally.
+4. Find the module by name, enable it, and drag it to the desired position.
+5. Tap **Save** and return to the homescreen.
 
 ---
 
 ## Adding more modules
 
-The plugin is designed to be extended. To add a new SimpleUI-compatible module:
+The plugin auto-discovers every file matching `module_*.lua` inside the `modules/` folder. To add a new SimpleUI-compatible module:
 
 1. Drop `module_yourname.lua` into `simpleui_ext.koplugin/modules/`.
-2. Add `"modules/module_yourname"` to the `MODULES` table in `main.lua`.
-3. Restart KOReader.
+2. Restart KOReader — no other changes needed.
 
 The module must follow [SimpleUI's module contract](https://github.com/doctorhetfield-cmd/simpleui.koplugin) (`id`, `name`, `label`, `enabled_key`, `build(w, ctx)`, `getHeight(ctx)`, …).
 
@@ -111,7 +138,8 @@ The module must follow [SimpleUI's module contract](https://github.com/doctorhet
 
 ## Credits
 
-- **[Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation. Bookshelf is the original source of this visual design.
+- **[Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation.
 - **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
-- **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI. 
+- **[quanganhdo/koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches)** — `module_recent_book_stats.lua` is a modified version of `2-reading-stats-popup.lua` from this repository, adapted as a SimpleUI homescreen module.
+- **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI.
 

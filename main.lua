@@ -3,18 +3,44 @@
 --
 -- HOW TO ADD A NEW MODULE
 -- 1. Drop module_yourname.lua into simpleui_ext.koplugin/modules/
--- 2. Append its require path to MODULES below.
--- 3. Done. The module will appear in SimpleUI's homescreen arrange list
+-- 2. Done. The module will appear in SimpleUI's homescreen arrange list
 --    on next KOReader start (or after a hot-reload).
+--    (No need to edit this file.)
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger          = require("logger")
 
--- List of module require-paths relative to this plugin's directory.
--- Each entry must resolve to a file with the standard SimpleUI module contract.
-local MODULES = {
-    "modules/module_hero_currently",
-}
+-- Auto-discover all module_*.lua files inside the modules/ subdirectory.
+-- Runs once at startup; with a handful of files the overhead is negligible.
+-- plugin_dir is self.path, set automatically by KOReader's pluginloader.
+local function discover_modules(plugin_dir)
+    if not plugin_dir then
+        logger.warn("simpleui_ext: could not resolve plugin directory, skipping auto-discovery")
+        return {}
+    end
+
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs then
+        logger.warn("simpleui_ext: lfs unavailable, skipping auto-discovery")
+        return {}
+    end
+
+    local modules = {}
+    local ok, iter, dir_obj = pcall(lfs.dir, plugin_dir .. "/modules")
+    if not ok then
+        logger.warn("simpleui_ext: cannot scan modules/ dir: " .. tostring(iter))
+        return modules
+    end
+    for entry in iter, dir_obj do
+        -- Only pick up files like  module_foo.lua  (prefix required, no sub-dirs)
+        local stem = entry:match("^(module_%a[%w_]*)%.lua$")
+        if stem then
+            modules[#modules + 1] = "modules/" .. stem
+        end
+    end
+    table.sort(modules)   -- deterministic load order
+    return modules
+end
 
 -- ---------------------------------------------------------------------------
 local SimpleUIExtPlugin = WidgetContainer:new{
@@ -42,7 +68,7 @@ function SimpleUIExtPlugin:_register()
     self._registry = Registry
     self._mod_ids  = {}
 
-    for _, path in ipairs(MODULES) do
+    for _, path in ipairs(discover_modules(self.path)) do
         local ok2, mod = pcall(require, path)
         if not ok2 or not mod then
             logger.warn("simpleui_ext: failed to load module '" .. path ..
