@@ -89,8 +89,9 @@ end
 -- ---------------------------------------------------------------------------
 -- Setting keys
 -- ---------------------------------------------------------------------------
-local SK_TIME_FMT = "rbs_time_format"
-local SK_TAPPABLE = "rbs_tappable"
+local SK_TIME_FMT      = "rbs_time_format"
+local SK_TAPPABLE      = "rbs_tappable"
+local SK_EXCLUDE_PATHS = "rbs_exclude_paths"
 local FMT_NICKEL  = "nickel"   -- human (e.g. "3.5 hours")
 local FMT_XHYM    = "xhym"    -- compact (e.g. "3h30m")
 
@@ -105,6 +106,30 @@ local function isTappable(pfx)
     if not S then return true end
     local v = S:readSetting(pfx .. SK_TAPPABLE)
     return v ~= false   -- default true: treat nil as enabled
+end
+
+-- Returns a list of path fragments the user wants excluded from recent.
+-- Accepts comma- or newline-separated entries; trims whitespace.
+local function getExcludePaths(pfx)
+    local S = getSettings()
+    if not S then return {} end
+    local raw = S:readSetting(pfx .. SK_EXCLUDE_PATHS)
+    if not raw or raw == "" then return {} end
+    local result = {}
+    for token in raw:gmatch("[^,\n]+") do
+        local t = token:match("^%s*(.-)%s*$")
+        if t ~= "" then result[#result + 1] = t end
+    end
+    return result
+end
+
+-- Returns true when fp contains any of the exclude fragments (plain substring).
+local function isExcluded(fp, excludes)
+    if not fp or #excludes == 0 then return false end
+    for _, frag in ipairs(excludes) do
+        if fp:find(frag, 1, true) then return true end
+    end
+    return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -265,13 +290,22 @@ end
 -- Book data  (most recently opened entry from ReadHistory + DocSettings)
 -- ---------------------------------------------------------------------------
 
-local function getMostRecentBook()
+local function getMostRecentBook(excludes)
+    excludes = excludes or {}
     local ok, RH = pcall(require, "readhistory")
     if not ok or not RH then return nil end
     if not (RH.hist and #RH.hist > 0) then
         pcall(function() RH:reload() end)
     end
-    local entry = RH.hist and RH.hist[1]
+    if not RH.hist then return nil end
+    -- Walk history and return the first entry whose path is not excluded.
+    local entry
+    for _, e in ipairs(RH.hist) do
+        if e and e.file and not isExcluded(e.file, excludes) then
+            entry = e
+            break
+        end
+    end
     if not entry or not entry.file then return nil end
 
     local fp    = entry.file
@@ -331,7 +365,7 @@ local function gatherStats(book, pfx, conn_ext)
     if pages > 0 then
         s.book_pages_read = {
             value = fmtFraction(cur_page, pages),
-            unit  = (cur_page == 1) and "page read" or "pages read",
+            unit  = "",
         }
     end
 
@@ -494,7 +528,9 @@ end
 
 -- Stats are cached for _CACHE_TTL seconds keyed by (book filepath + pfx).
 -- The cache is also cleared whenever M.reset() is called (hot-reload).
-local _CACHE_TTL = 60   -- seconds
+-- 5 s is enough to avoid redundant re-queries during a single home-screen
+-- repaint cycle while still showing fresh data after returning from a book.
+local _CACHE_TTL = 300  -- seconds (5 min; books invalidate the cache on close anyway)
 local _cache     = nil  -- { fp, pfx, ts, stats }
 
 local function cacheGet(book, pfx)
@@ -531,6 +567,12 @@ function M.reset()
     _cache       = nil   -- invalidate on hot-reload
 end
 
+-- Called by main.lua's onCloseDocument so stats refresh immediately
+-- after the user returns from reading, without waiting for the TTL.
+function M.invalidateCache()
+    _cache = nil
+end
+
 -- ---------------------------------------------------------------------------
 -- M.build(w, ctx) → widget | nil
 -- ---------------------------------------------------------------------------
@@ -548,8 +590,9 @@ function M.build(w, ctx)
 
     -- Gather data (use cache when available; ctx.db_conn is the shared
     -- stats DB connection provided by the homescreen via M.needs = { db = true })
-    local book  = getMostRecentBook()
-    local stats = cacheGet(book, pfx)
+    local excludes = getExcludePaths(pfx)
+    local book     = getMostRecentBook(excludes)
+    local stats    = cacheGet(book, pfx)
     if not stats then
         stats = gatherStats(book, pfx, ctx and ctx.db_conn)
         cachePut(book, pfx, stats)
@@ -601,8 +644,38 @@ function M.build(w, ctx)
     end
 
     -- Shorthand builders scoped to the narrower panel columns
+
+    -- Auto-shrink value face so the text fits within max_w pixels.
+    -- Tries progressively smaller sizes down to min_fs before giving up.
+    local function fitValFace(text, max_w)
+        if not text or text == "" then return face_v end
+        local fs     = val_fs
+        local min_fs = math.max(9, val_fs - 12)
+        local face   = face_v
+        local tw     = TextWidget:new{ text = text, face = face }
+        while tw:getSize().w > max_w and fs > min_fs do
+            fs   = fs - 1
+            face = Font:getFace("NotoSerif-Bold.ttf", fs) or Font:getFace("tfont", fs)
+            tw   = TextWidget:new{ text = text, face = face }
+        end
+        return face
+    end
+
     local function pvline(data, extra)
-        return mkValueLine(face_v, face_l, icol_w, data, extra, make_tbw)
+        if not data or data.value == "" then
+            return mkValueLine(face_v, face_l, icol_w, data, extra, make_tbw)
+        end
+        -- Mirror mkValueLine's label logic to know how much width the value can use.
+        local desc = data.unit or ""
+        if extra and extra ~= "" then
+            desc = (desc ~= "") and (desc .. " " .. extra) or extra
+        end
+        -- With a label: value gets ~55 % of column; without: almost the full column.
+        local max_val_w = (desc ~= "")
+            and math.max(1, math.floor(icol_w * 0.55))
+            or  math.max(1, icol_w - Size.padding.small)
+        local vface = fitValFace(data.value, max_val_w)
+        return mkValueLine(vface, face_l, icol_w, data, extra, make_tbw)
     end
     local function ptrow(l, r)
         return HorizontalGroup:new{
@@ -816,6 +889,53 @@ function M.getMenuItems(ctx_menu)
                     S:saveSetting(pfx .. SK_TAPPABLE, not isTappable(pfx))
                 end
                 refresh()
+            end,
+        },
+
+        -- 5. Exclude paths from recent
+        {
+            text_func = function()
+                local raw = S and S:readSetting(pfx .. SK_EXCLUDE_PATHS)
+                if not raw or raw == "" then
+                    return _lc("Exclude Paths from Recent")
+                end
+                local n = 0
+                for _ in raw:gmatch("[^,\n]+") do n = n + 1 end
+                return string.format("%s (%d)", _lc("Exclude Paths from Recent"), n)
+            end,
+            callback = function()
+                local InputDialog = require("ui/widget/inputdialog")
+                local UIManager   = require("ui/uimanager")
+                local raw = (S and S:readSetting(pfx .. SK_EXCLUDE_PATHS)) or ""
+                local dlg
+                dlg = InputDialog:new{
+                    title       = _lc("Exclude Paths from Recent"),
+                    input       = raw,
+                    input_hint  = "/mnt/onboard/rss, instapaper",
+                    description = _lc("Comma-separated path fragments.\nBooks whose path contains any fragment will be skipped."),
+                    allow_newline    = false,
+                    buttons = {{
+                        {
+                            text     = _lc("Cancel"),
+                            callback = function() UIManager:close(dlg) end,
+                        },
+                        {
+                            text             = _lc("Save"),
+                            is_enter_default = true,
+                            callback = function()
+                                local val = dlg:getInputText()
+                                if S then
+                                    S:saveSetting(pfx .. SK_EXCLUDE_PATHS, val)
+                                end
+                                _cache = nil   -- show correct book immediately
+                                UIManager:close(dlg)
+                                refresh()
+                            end,
+                        },
+                    }},
+                }
+                UIManager:show(dlg)
+                dlg:onShowKeyboard()
             end,
         },
     }

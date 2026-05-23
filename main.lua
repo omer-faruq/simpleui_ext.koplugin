@@ -44,9 +44,11 @@ end
 
 -- ---------------------------------------------------------------------------
 local SimpleUIExtPlugin = WidgetContainer:new{
-    name      = "simpleui_ext",
-    _registry = nil,
-    _mod_ids  = {},
+    name        = "simpleui_ext",
+    is_doc_only = false,   -- must be false so onCloseDocument fires in Reader context
+    _registry   = nil,
+    _mod_ids    = {},
+    _mods       = {},      -- module objects, for event forwarding
 }
 
 function SimpleUIExtPlugin:init()
@@ -67,6 +69,7 @@ function SimpleUIExtPlugin:_register()
     end
     self._registry = Registry
     self._mod_ids  = {}
+    self._mods     = {}
 
     for _, path in ipairs(discover_modules(self.path)) do
         local ok2, mod = pcall(require, path)
@@ -79,7 +82,19 @@ function SimpleUIExtPlugin:_register()
         else
             Registry.register(mod)
             self._mod_ids[#self._mod_ids + 1] = mod.id
+            self._mods[#self._mods + 1]       = mod
             logger.info("simpleui_ext: registered module '" .. mod.id .. "'")
+        end
+    end
+end
+
+-- Forwarded from ReaderUI when the user closes a book.
+-- Invalidates any module caches so the homescreen shows fresh data
+-- the moment the user returns (instead of waiting for the TTL to expire).
+function SimpleUIExtPlugin:onCloseDocument()
+    for _, mod in ipairs(self._mods) do
+        if type(mod.invalidateCache) == "function" then
+            mod.invalidateCache()
         end
     end
 end
@@ -93,6 +108,7 @@ function SimpleUIExtPlugin:onClosePlugin()
     end
     self._registry = nil
     self._mod_ids  = {}
+    self._mods     = {}
 end
 
 return SimpleUIExtPlugin

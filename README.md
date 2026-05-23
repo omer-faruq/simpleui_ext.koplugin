@@ -60,7 +60,7 @@ Displays reading statistics for the most recently opened book in a compact two-p
 - Book title embedded in the BOOK header (pixel-accurate truncation with ellipsis)
 - Tap to open the book
 - Wallpaper-aware: all text areas transparent, headers show a solid underline instead of a filled background
-- 60-second cache per book to avoid repeated database queries
+- 5-minute cache per book; automatically invalidated when the book is closed so stats are always fresh on return
 - Uses the shared Statistics plugin DB connection when available (`M.needs = { db = true }`)
 
 **Settings (via Arrange Modules):**
@@ -68,7 +68,9 @@ Displays reading statistics for the most recently opened book in a compact two-p
 | Setting | Description |
 |---|---|
 | Scale | Resize the card proportionally |
+| Time Format | Human-readable (e.g. 3.5 hours) or compact XhYm (e.g. 3h30m) |
 | Tap to Open Book | Tapping the card opens the most recently read book |
+| Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are skipped |
 
 ---
 
