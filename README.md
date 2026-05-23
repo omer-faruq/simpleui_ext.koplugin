@@ -1,8 +1,19 @@
 # SimpleUI Extra Modules
 
-Extra homescreen modules for SimpleUI on KOReader.
+Extra homescreen modules and patches for SimpleUI on KOReader.
 
-Modules are **auto-discovered**: drop any `module_*.lua` file into the `modules/` folder and it will be picked up automatically on the next KOReader start — no changes to `main.lua` needed.
+**Modules** are **auto-discovered**: drop any `module_*.lua` file into the `modules/` folder and it will be picked up automatically on the next KOReader start — no changes to `main.lua` needed.
+
+**Patches** are also **auto-discovered**: drop any `patch_*.lua` file into the `patches/` folder. Each patch file must return a table with two fields:
+
+```lua
+return {
+    id    = "my_patch_id",       -- string, used in log messages
+    apply = function() ... end,  -- called once after all plugins have initialised
+}
+```
+
+A patch can monkey-patch any public function on any `require()`-able module — not just SimpleUI modules. If a patch fails (e.g. after a SimpleUI update), it is silently skipped and all other modules and patches continue to work normally.
 
 ---
 
@@ -75,6 +86,24 @@ Displays reading statistics for the most recently opened book in a compact two-p
 
 ---
 
+## Built-in Module Patches
+
+In addition to new modules, this plugin applies transparent patches to SimpleUI's built-in modules to add missing functionality.
+
+### Cover Deck — Exclude Paths from Recent
+
+When the Cover Deck source is set to **Recent Books**, this patch adds an **Exclude Paths from Recent** filter (identical to the one on Hero Currently Reading and Recent Book Stats).
+
+**Setting (via Arrange Modules → Cover Deck):**
+
+| Setting | Description |
+|---|---|
+| Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are excluded from the Recent Books source (e.g. `/mnt/onboard/rss, instapaper, cache`) |
+
+The filter has no effect when the source is set to **To Be Read**.
+
+---
+
 ## Requirements
 
 | Dependency | Notes |
@@ -105,9 +134,11 @@ Displays reading statistics for the most recently opened book in a compact two-p
    └── simpleui_ext.koplugin/
        ├── _meta.lua
        ├── main.lua
-       └── modules/
-           ├── module_hero_currently.lua
-           └── module_recent_book_stats.lua
+       ├── modules/
+       │   ├── module_hero_currently.lua
+       │   └── module_recent_book_stats.lua
+       └── patches/
+           └── patch_coverdeck_exclude.lua
    ```
 
 3. **Restart KOReader** (or use *Top Menu → Settings → Start fresh*).
@@ -136,6 +167,17 @@ The plugin auto-discovers every file matching `module_*.lua` inside the `modules
 2. Restart KOReader — no other changes needed.
 
 The module must follow [SimpleUI's module contract](https://github.com/doctorhetfield-cmd/simpleui.koplugin) (`id`, `name`, `label`, `enabled_key`, `build(w, ctx)`, `getHeight(ctx)`, …).
+
+---
+
+## Adding more patches
+
+The plugin auto-discovers every file matching `patch_*.lua` inside the `patches/` folder. To add a new patch:
+
+1. Drop `patch_yourname.lua` into `simpleui_ext.koplugin/patches/`.
+2. Restart KOReader — no other changes needed.
+
+The file must return a table with `id` (string) and `apply` (function). `apply()` is called once after all plugins have initialised, so any `require()`-able module is available. If `apply()` raises an error it is caught and logged; no other module or patch is affected.
 
 ---
 

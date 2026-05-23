@@ -2,13 +2,40 @@
 -- Plugin entry point.
 --
 -- HOW TO ADD A NEW MODULE
--- 1. Drop module_yourname.lua into simpleui_ext.koplugin/modules/
--- 2. Done. The module will appear in SimpleUI's homescreen arrange list
---    on next KOReader start (or after a hot-reload).
---    (No need to edit this file.)
+--   Drop module_yourname.lua into simpleui_ext.koplugin/modules/
+--   It will be auto-registered with SimpleUI on the next KOReader start.
+--
+-- HOW TO ADD A NEW PATCH
+--   Drop patch_yourname.lua into simpleui_ext.koplugin/patches/
+--   The file must return a table with:
+--     patch.id     string   — unique identifier used in log messages
+--     patch.apply  func()   — called once after SimpleUI has initialised
+--   Patches are applied in alphabetical order after modules are registered.
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger          = require("logger")
+
+-- ---------------------------------------------------------------------------
+-- discover_patches — scans patches/ for patch_*.lua files.
+-- Returns a sorted list of require-paths (e.g. "patches/patch_foo").
+-- Mirrors discover_modules; runs once at startup.
+-- ---------------------------------------------------------------------------
+local function discover_patches(plugin_dir)
+    if not plugin_dir then return {} end
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs then return {} end
+    local patches = {}
+    local ok, iter, dir_obj = pcall(lfs.dir, plugin_dir .. "/patches")
+    if not ok then return patches end
+    for entry in iter, dir_obj do
+        local stem = entry:match("^(patch_%a[%w_]*)%.lua$")
+        if stem then
+            patches[#patches + 1] = "patches/" .. stem
+        end
+    end
+    table.sort(patches)   -- deterministic, alphabetical order
+    return patches
+end
 
 -- Auto-discover all module_*.lua files inside the modules/ subdirectory.
 -- Runs once at startup; with a handful of files the overhead is negligible.
@@ -84,6 +111,29 @@ function SimpleUIExtPlugin:_register()
             self._mod_ids[#self._mod_ids + 1] = mod.id
             self._mods[#self._mods + 1]       = mod
             logger.info("simpleui_ext: registered module '" .. mod.id .. "'")
+        end
+    end
+
+    -- Apply patches from patches/.  Each patch file is required once;
+    -- patch.apply() is called immediately.  Errors are caught so a broken
+    -- patch never prevents modules from loading.
+    for _, path in ipairs(discover_patches(self.path)) do
+        local ok3, patch = pcall(require, path)
+        if not ok3 or type(patch) ~= "table" then
+            logger.warn("simpleui_ext: failed to load patch '" .. path ..
+                        "': " .. tostring(patch))
+        elseif type(patch.apply) ~= "function" then
+            logger.warn("simpleui_ext: patch '" .. path ..
+                        "' has no apply() function — skipped")
+        else
+            local ok4, err = pcall(patch.apply)
+            if not ok4 then
+                logger.warn("simpleui_ext: patch '" .. (patch.id or path) ..
+                            "' apply() failed: " .. tostring(err))
+            else
+                logger.info("simpleui_ext: applied patch '" ..
+                            (patch.id or path) .. "'")
+            end
         end
     end
 end
