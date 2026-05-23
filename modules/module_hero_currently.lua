@@ -200,7 +200,32 @@ local _BASE_AUTHOR_GAP = Screen:scaleBySize(4)
 local _BASE_DESC_GAP   = Screen:scaleBySize(6)
 
 -- Setting keys (prepended with pfx at runtime)
-local SCALE_KEY = "hero_currently_scale"
+local SCALE_KEY        = "hero_currently_scale"
+local SK_EXCLUDE_PATHS = "hero_currently_exclude_paths"
+
+-- ---------------------------------------------------------------------------
+-- Exclude-path helpers (mirrors module_recent_book_stats implementation)
+-- ---------------------------------------------------------------------------
+local function getExcludePaths(pfx)
+    local S = getSettings()
+    if not S then return {} end
+    local raw = S:readSetting(pfx .. SK_EXCLUDE_PATHS)
+    if not raw or raw == "" then return {} end
+    local result = {}
+    for token in raw:gmatch("[^,\n]+") do
+        local t = token:match("^%s*(.-)%s*$")
+        if t ~= "" then result[#result + 1] = t end
+    end
+    return result
+end
+
+local function isExcluded(fp, excludes)
+    if not fp or #excludes == 0 then return false end
+    for _, frag in ipairs(excludes) do
+        if fp:find(frag, 1, true) then return true end
+    end
+    return false
+end
 
 -- ---------------------------------------------------------------------------
 -- Module table
@@ -223,23 +248,32 @@ function M.reset()
 end
 
 -- ---------------------------------------------------------------------------
--- _getCurrentFP(ctx) — returns the currently-reading filepath.
+-- _getCurrentFP(ctx, excludes) — returns the filepath to display.
 --
 -- ctx.current_fp is only populated by the homescreen when the built-in
 -- "currently" module is also enabled.  When it is off (the common case
 -- when using this module as a standalone replacement) we fall back to
--- ReadHistory.hist[1] — the most recently opened book — which is already
--- in memory and requires no file I/O.
+-- ReadHistory — walking entries in order until one passes the exclude
+-- filter, mirroring the behaviour of module_recent_book_stats.
 -- ---------------------------------------------------------------------------
-local function _getCurrentFP(ctx)
-    if ctx.current_fp then return ctx.current_fp end
+local function _getCurrentFP(ctx, excludes)
+    excludes = excludes or {}
+    -- ctx.current_fp: honour it only when it is not excluded.
+    if ctx.current_fp and not isExcluded(ctx.current_fp, excludes) then
+        return ctx.current_fp
+    end
     local ok, RH = pcall(require, "readhistory")
     if not ok or not RH then return nil end
     if not (RH.hist and #RH.hist > 0) then
         pcall(function() RH:reload() end)
     end
-    local entry = RH.hist and RH.hist[1]
-    return entry and entry.file
+    if not RH.hist then return nil end
+    for _, e in ipairs(RH.hist) do
+        if e and e.file and not isExcluded(e.file, excludes) then
+            return e.file
+        end
+    end
+    return nil
 end
 
 -- ---------------------------------------------------------------------------
@@ -259,10 +293,11 @@ function M.build(w, ctx)
 
     Config.applyLabelToggle(M, M.label)
 
-    local fp = _getCurrentFP(ctx)
+    local pfx      = ctx.pfx or ""
+    local excludes = getExcludePaths(pfx)
+    local fp       = _getCurrentFP(ctx, excludes)
     if not fp then return nil end
 
-    local pfx   = ctx.pfx or ""
     local scale = Config.getModuleScale("hero_currently", pfx)
     local PAD   = UI.PAD
 
@@ -690,6 +725,52 @@ function M.getMenuItems(ctx_menu)
         }),
         toggle_item("Show Frame",        "hero_currently_show_frame"),
         toggle_item("Solid Background",  "hero_currently_solid_bg"),
+
+        -- Exclude paths from recent
+        {
+            text_func = function()
+                local raw = Settings and Settings:readSetting(pfx .. SK_EXCLUDE_PATHS)
+                if not raw or raw == "" then
+                    return _lc("Exclude Paths from Recent")
+                end
+                local n = 0
+                for _ in raw:gmatch("[^,\n]+") do n = n + 1 end
+                return string.format("%s (%d)", _lc("Exclude Paths from Recent"), n)
+            end,
+            callback = function()
+                local InputDialog = require("ui/widget/inputdialog")
+                local UIManager   = require("ui/uimanager")
+                local raw = (Settings and Settings:readSetting(pfx .. SK_EXCLUDE_PATHS)) or ""
+                local dlg
+                dlg = InputDialog:new{
+                    title       = _lc("Exclude Paths from Recent"),
+                    input       = raw,
+                    input_hint  = "/mnt/onboard/rss,instapaper,cache",
+                    description = _lc("Comma-separated path fragments.\nBooks whose path contains any fragment will be skipped."),
+                    allow_newline    = false,
+                    buttons = {{
+                        {
+                            text     = _lc("Cancel"),
+                            callback = function() UIManager:close(dlg) end,
+                        },
+                        {
+                            text             = _lc("Save"),
+                            is_enter_default = true,
+                            callback = function()
+                                local val = dlg:getInputText()
+                                if Settings then
+                                    Settings:saveSetting(pfx .. SK_EXCLUDE_PATHS, val)
+                                end
+                                UIManager:close(dlg)
+                                refresh()
+                            end,
+                        },
+                    }},
+                }
+                UIManager:show(dlg)
+                dlg:onShowKeyboard()
+            end,
+        },
     }
 end
 

@@ -39,6 +39,7 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
 | Scale | Resize the card proportionally |
 | Show Frame | Draw a thin border around the card |
 | Solid Background | Fill the card background with the theme background colour |
+| Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are skipped (e.g. `/mnt/onboard/rss,instapaper,cache`) |
 
 ---
 
