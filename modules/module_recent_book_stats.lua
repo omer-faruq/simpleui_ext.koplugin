@@ -163,7 +163,7 @@ local function fmtTimeHuman(secs)
         return { value = fmtCount(mins), unit = mins == 1 and "minute" or "minutes" }
     end
     local h = mins / 60
-    local val = (h < 10) and string.format("%.1f", h) or string.format("%.0f", h)
+    local val = (h < 100) and string.format("%.1f", h) or string.format("%.0f", h)
     return { value = val, unit = h < 2 and "hour" or "hours" }
 end
 
@@ -217,8 +217,19 @@ end
 -- Stats DB helpers
 -- ---------------------------------------------------------------------------
 
--- Per-page duration cap (seconds) — matches the statistics plugin.
-local _MAX_SEC_PER_PAGE = 180
+-- Per-page duration cap (seconds).
+-- Read from G_reader_settings at gather time to match whatever the user
+-- has configured in the Statistics plugin (default 120 s = 2 minutes).
+-- The constant below is only a fallback for when the global isn't available.
+local _DEFAULT_MAX_SEC = 120
+
+local function getMaxSec()
+    local ok, max = pcall(function()
+        local s = G_reader_settings:readSetting("statistics")
+        return s and tonumber(s.max_sec)
+    end)
+    return (ok and max and max > 0) and max or _DEFAULT_MAX_SEC
+end
 
 local function openStatsDB()
     local ok, SQ3 = pcall(require, "lua-ljsqlite3/init")
@@ -242,8 +253,8 @@ local function dbGetBookId(conn, md5)
 end
 
 -- Returns { total_time, read_pages, avg_time } or nil.
--- Duration is capped at _MAX_SEC_PER_PAGE per page (mirrors stats plugin).
-local function dbGetTimeStats(conn, book_id)
+-- Duration is capped at max_sec per page, matching the Statistics plugin.
+local function dbGetTimeStats(conn, book_id, max_sec)
     local result
     pcall(function()
         local rows = conn:exec(string.format([[
@@ -255,7 +266,7 @@ local function dbGetTimeStats(conn, book_id)
             )
             SELECT sum(min(pd, %d)), count(*)
             FROM   ps;
-        ]], book_id, _MAX_SEC_PER_PAGE))
+        ]], book_id, max_sec))
         if rows and rows[1] and rows[1][1] then
             local tt = tonumber(rows[1][1]) or 0
             local rp = tonumber(rows[2] and rows[2][1]) or 0
@@ -382,7 +393,8 @@ local function gatherStats(book, pfx, conn_ext)
         return s
     end
 
-    local ts         = dbGetTimeStats(conn, book_id)
+    local max_sec    = getMaxSec()
+    local ts         = dbGetTimeStats(conn, book_id, max_sec)
     local total_days = dbGetTotalDays(conn, book_id)
     if owns_conn then conn:close() end
 
