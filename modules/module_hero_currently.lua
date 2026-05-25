@@ -102,6 +102,19 @@ local function stripHTML(s)
 end
 
 -- ---------------------------------------------------------------------------
+-- Time formatter: seconds → "Xh Ym" / "Xh" / "Ym"
+-- ---------------------------------------------------------------------------
+local function fmtTime(secs)
+    secs = math.floor(secs or 0)
+    if secs <= 0 then return "0m" end
+    local h = math.floor(secs / 3600)
+    local m = math.floor((secs % 3600) / 60)
+    if h > 0 and m > 0 then return string.format("%dh %dm", h, m)
+    elseif h > 0        then return string.format("%dh", h)
+    else                     return string.format("%dm", m) end
+end
+
+-- ---------------------------------------------------------------------------
 -- Description reader — opens the book sidecar and returns the blurb string,
 -- or nil when absent.  Tries custom_metadata.lua overrides first.
 -- ---------------------------------------------------------------------------
@@ -158,9 +171,20 @@ end
 -- ---------------------------------------------------------------------------
 -- Stats DB: avg reading time per page (same query as module_currently)
 -- ---------------------------------------------------------------------------
-local _MAX_TIME_PER_PAGE = 180  -- seconds per page cap (matches module_currently)
+-- Read the cap from the Statistics plugin's own settings so the value always
+-- matches KOReader's "Time spent reading" figure (default 120 s = 2 minutes).
+local _DEFAULT_MAX_TIME_PER_PAGE = 120
+local function getMaxTimePage()
+    local ok, max = pcall(function()
+        local s = G_reader_settings:readSetting("statistics")
+        return s and tonumber(s.max_sec)
+    end)
+    return (ok and max and max > 0) and max or _DEFAULT_MAX_TIME_PER_PAGE
+end
+
 local function fetchAvgTimeFromDB(md5, db_conn)
     if not md5 or not db_conn then return nil end
+    local max_sec = getMaxTimePage()
     local result = nil
     pcall(function()
         local row = db_conn:exec(string.format([[
@@ -173,13 +197,52 @@ local function fetchAvgTimeFromDB(md5, db_conn)
             )
             SELECT sum(min(page_dur, %d)), count(*)
             FROM ps_agg;
-        ]], md5, _MAX_TIME_PER_PAGE))
+        ]], md5, max_sec))
         if row and row[1] and row[1][1] then
             local capped = tonumber(row[1][1]) or 0
             local pages  = tonumber(row[2] and row[2][1]) or 0
             if pages > 0 and capped > 0 then
                 result = capped / pages
             end
+        end
+    end)
+    return result
+end
+
+-- Fetches days read, total time read, and capped avg time per page from the
+-- Stats DB.  Returns { days, total_secs, avg_time } or nil.
+local function fetchStatsFromDB(md5, db_conn)
+    if not md5 or not db_conn then return nil end
+    local max_sec = getMaxTimePage()
+    local result  = nil
+    pcall(function()
+        local row = db_conn:exec(string.format([[
+            WITH b AS (SELECT id FROM book WHERE md5 = %q LIMIT 1),
+            ps_agg AS (
+                SELECT ps.page,
+                       sum(ps.duration)   AS page_dur,
+                       min(ps.start_time) AS first_start
+                FROM page_stat ps
+                WHERE ps.id_book = (SELECT id FROM b)
+                GROUP BY ps.page
+            )
+            SELECT
+                count(DISTINCT date(first_start, 'unixepoch', 'localtime')),
+                sum(page_dur),
+                count(*),
+                sum(min(page_dur, %d))
+            FROM ps_agg;
+        ]], md5, max_sec))
+        if row and row[1] and row[1][1] then
+            local days   = tonumber(row[1][1]) or 0
+            local secs   = tonumber(row[2] and row[2][1]) or 0
+            local pages  = tonumber(row[3] and row[3][1]) or 0
+            local capped = tonumber(row[4] and row[4][1]) or 0
+            result = {
+                days       = days,
+                total_secs = secs,
+                avg_time   = (pages > 0 and capped > 0) and (capped / pages) or nil,
+            }
         end
     end)
     return result
@@ -202,6 +265,8 @@ local _BASE_DESC_GAP   = Screen:scaleBySize(6)
 -- Setting keys (prepended with pfx at runtime)
 local SCALE_KEY        = "hero_currently_scale"
 local SK_EXCLUDE_PATHS = "hero_currently_exclude_paths"
+local SK_SHOW_STATS    = "hero_currently_show_stats"
+local SK_SHOW_PROGRESS = "hero_currently_show_progress"
 
 -- ---------------------------------------------------------------------------
 -- Exclude-path helpers (mirrors module_recent_book_stats implementation)
@@ -364,13 +429,14 @@ function M.build(w, ctx)
         }
     end
 
-    -- ── right_bottom: single progress row, bottom-anchored ───────────────────
-    -- Mirrors bookshelf template: "73 / 272  [elastic bar]  3h 27m left"
-    -- bar_h = prog_fs  (bookshelf bar_height = 100% of face.size)
+    -- ── right_bottom: progress row + optional stats, bottom-anchored ─────────
     local right_bottom = VerticalGroup:new{ align = "left" }
+    -- Pin the group width to tw so BottomContainer left-aligns it regardless
+    -- of whether the progress bar (which naturally fills tw) is visible or not.
+    right_bottom[1] = HorizontalSpan:new{ width = tw }
     local pct = bd.percent or 0
 
-    -- Get book MD5 for Stats DB query (more accurate avg_time than DocSettings)
+    -- Get book MD5 for Stats DB query (used by both progress and stats rows)
     local book_md5 = prefetched and prefetched.partial_md5_checksum
     if not book_md5 and ctx.db_conn then
         local ok_ds, DS = pcall(require, "docsettings")
@@ -383,51 +449,94 @@ function M.build(w, ctx)
         end
     end
 
-    -- avg_time: prefer Stats DB (capped per-page) over DocSettings totals
-    local avg_time = nil
-    if book_md5 and ctx.db_conn then
-        avg_time = fetchAvgTimeFromDB(book_md5, ctx.db_conn)
-    end
-    if not avg_time or avg_time <= 0 then avg_time = bd.avg_time end
+    -- Progress row: default on; hidden when the setting is explicitly false.
+    if Settings:readSetting(pfx .. SK_SHOW_PROGRESS) ~= false then
+        -- avg_time: prefer Stats DB (capped per-page) over DocSettings totals
+        local avg_time = nil
+        if book_md5 and ctx.db_conn then
+            avg_time = fetchAvgTimeFromDB(book_md5, ctx.db_conn)
+        end
+        if not avg_time or avg_time <= 0 then avg_time = bd.avg_time end
 
-    local prog_left, prog_right
-    if bd.pages and bd.pages > 0 then
-        local cur  = math.floor(pct * bd.pages)
-        prog_left  = string.format("%d / %d", cur, bd.pages)  -- no "p." prefix (matches bookshelf)
-        local tl   = SH.formatTimeLeft(pct, bd.pages, avg_time)
-        if tl then prog_right = tl .. " left" end
-    else
-        prog_left = string.format("%.0f%%", pct * 100)
-    end
+        local prog_left, prog_right
+        if bd.pages and bd.pages > 0 then
+            local cur  = math.floor(pct * bd.pages)
+            prog_left  = string.format("%d / %d", cur, bd.pages)  -- no "p." prefix (matches bookshelf)
+            local tl   = SH.formatTimeLeft(pct, bd.pages, avg_time)
+            if tl then prog_right = tl .. " left" end
+        else
+            prog_left = string.format("%.0f%%", pct * 100)
+        end
 
-    -- Bold TextWidgets (bookshelf progress region: bold = true)
-    local lw    = TextWidget:new{ text = prog_left,  face = face_prog, fgcolor = CLR_SUB, bold = true }
-    local rw    = prog_right and TextWidget:new{ text = prog_right, face = face_prog, fgcolor = CLR_SUB, bold = true }
-    local lw_w  = lw:getSize().w
-    local rw_w  = rw and rw:getSize().w or 0
-    -- Bookshelf uses two literal spaces as gap (Size.padding.small * 2 ≈ that)
-    local pad_s = Size.padding.small * 2
-    local bar_w = math.max(1, tw - lw_w - rw_w
-                              - (lw_w > 0 and pad_s or 0)
-                              - (rw_w > 0 and pad_s or 0))
+        -- Bold TextWidgets (bookshelf progress region: bold = true)
+        local lw    = TextWidget:new{ text = prog_left,  face = face_prog, fgcolor = CLR_SUB, bold = true }
+        local rw    = prog_right and TextWidget:new{ text = prog_right, face = face_prog, fgcolor = CLR_SUB, bold = true }
+        local lw_w  = lw:getSize().w
+        local rw_w  = rw and rw:getSize().w or 0
+        -- Bookshelf uses two literal spaces as gap (Size.padding.small * 2 ≈ that)
+        local pad_s = Size.padding.small * 2
+        local bar_w = math.max(1, tw - lw_w - rw_w
+                                  - (lw_w > 0 and pad_s or 0)
+                                  - (rw_w > 0 and pad_s or 0))
 
-    local inline_bar = ProgressWidget:new{
-        width      = bar_w,
-        height     = bar_h,
-        percentage = math.min(pct, 1.0),
-        style      = "bordered",  -- matches bookshelf bar_style = "bordered"
-        ticks      = nil,
-        last       = nil,
-    }
-    local prog_row = HorizontalGroup:new{ align = "center" }
-    prog_row[#prog_row + 1] = lw
-    prog_row[#prog_row + 1] = HorizontalSpan:new{ width = pad_s }
-    prog_row[#prog_row + 1] = inline_bar
-    if rw then
+        local inline_bar = ProgressWidget:new{
+            width      = bar_w,
+            height     = bar_h,
+            percentage = math.min(pct, 1.0),
+            style      = "bordered",  -- matches bookshelf bar_style = "bordered"
+            ticks      = nil,
+            last       = nil,
+        }
+        local prog_row = HorizontalGroup:new{ align = "center" }
+        prog_row[#prog_row + 1] = lw
         prog_row[#prog_row + 1] = HorizontalSpan:new{ width = pad_s }
-        prog_row[#prog_row + 1] = rw
+        prog_row[#prog_row + 1] = inline_bar
+        if rw then
+            prog_row[#prog_row + 1] = HorizontalSpan:new{ width = pad_s }
+            prog_row[#prog_row + 1] = rw
+        end
+        right_bottom[#right_bottom + 1] = prog_row
     end
-    right_bottom[#right_bottom + 1] = prog_row
+
+    -- ── Optional statistics row (below progress bar) ──────────────────────────
+    -- Shown only when "Show Statistics" is enabled in the module settings.
+    -- Displays days read and total time read in a compact single row.
+    -- Must be built before the description block so right_bottom:getSize().h
+    -- reflects the stats row when computing available space for the description.
+    if Settings:isTrue(pfx .. SK_SHOW_STATS) and book_md5 and ctx.db_conn then
+        local bstats = fetchStatsFromDB(book_md5, ctx.db_conn)
+        if bstats then
+            local parts = {}
+            if bstats.days and bstats.days > 0 then
+                parts[#parts+1] = string.format(
+                    bstats.days == 1 and "%d day" or "%d days", bstats.days)
+            end
+            if bstats.total_secs and bstats.total_secs > 0 then
+                parts[#parts+1] = fmtTime(bstats.total_secs) .. " read"
+            end
+            if #parts > 0 then
+                local stats_row = HorizontalGroup:new{ align = "center" }
+                for i, part in ipairs(parts) do
+                    if i > 1 then
+                        stats_row[#stats_row+1] = TextWidget:new{
+                            text    = " · ",
+                            face    = face_prog,
+                            fgcolor = CLR_SUB,
+                        }
+                    end
+                    stats_row[#stats_row+1] = TextWidget:new{
+                        text    = part,
+                        face    = face_prog,
+                        fgcolor = CLR_SUB,
+                    }
+                end
+                right_bottom[#right_bottom+1] = VerticalSpan:new{
+                    width = math.max(1, math.floor(Screen:scaleBySize(3) * scale))
+                }
+                right_bottom[#right_bottom+1] = stats_row
+            end
+        end
+    end
 
     -- ── Description: fills the slack between right_top and right_bottom ──────
     -- Matches bookshelf's dynamic layout: measure top_used + bottom_h at
@@ -707,6 +816,24 @@ function M.getMenuItems(ctx_menu)
         }
     end
 
+    -- Default-on toggle: nil (unset) is treated as true.
+    local function toggle_item_on(label, key)
+        return {
+            text_func      = function() return _lc(label) end,
+            checked_func   = function()
+                return not Settings or Settings:readSetting(pfx .. key) ~= false
+            end,
+            keep_menu_open = true,
+            callback       = function()
+                if Settings then
+                    local currently_on = Settings:readSetting(pfx .. key) ~= false
+                    Settings:saveSetting(pfx .. key, not currently_on)
+                end
+                refresh()
+            end,
+        }
+    end
+
     return {
         Config.makeLabelToggleItem(M.id, M.name, refresh, _lc),
         Config.makeScaleItem({
@@ -725,6 +852,8 @@ function M.getMenuItems(ctx_menu)
         }),
         toggle_item("Show Frame",        "hero_currently_show_frame"),
         toggle_item("Solid Background",  "hero_currently_solid_bg"),
+        toggle_item_on("Show Progress Bar", SK_SHOW_PROGRESS),
+        toggle_item("Show Statistics",   SK_SHOW_STATS),
 
         -- Exclude paths from recent
         {
