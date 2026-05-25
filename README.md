@@ -86,6 +86,67 @@ Displays reading statistics for the most recently opened book in a compact two-p
 
 ---
 
+### Reading Streaks
+
+Displays current and best reading streaks (daily and weekly) in a compact four-column card:
+
+```
+┌──────────┬──────────┬──────────┬──────────┐
+│ CURR WKS │ CURR DYS │ BEST WKS │ BEST DYS │
+│    3     │    21    │    12    │    45    │
+└──────────┴──────────┴──────────┴──────────┘
+```
+
+**Features:**
+- Four streak metrics in a single row: current weeks, current days, best weeks, best days
+- Data sourced from Statistics plugin database with intelligent caching
+- Wallpaper-aware: transparent background with border when wallpaper is active, bold fonts for better readability
+- Automatic cache invalidation when statistics database is updated
+- SimpleUI-style section headers with separators
+
+**Settings (via Arrange Modules):**
+
+| Setting | Description |
+|---|---|
+| Show section label | Toggle "Reading Streaks" header visibility |
+| Scale | Resize the card proportionally |
+
+---
+
+### Reading Insights
+
+Displays yearly reading statistics and monthly reading activity chart:
+
+```
+◀ 2025                         2026
+90 days read          1,407 pages read
+┌─────┬─────┬─────┬─────┬─────┬─────┐
+│ Jan │ Feb │ Mar │ Apr │ May │ Jun │
+│ ▓▓▓ │ ▓▓▓ │ ▓▓▓ │ ▓▓▓ │ ▓▓▓ │ ▓▓▓ │
+└─────┴─────┴─────┴─────┴─────┴─────┘
+```
+
+**Features:**
+- Yearly statistics: days read and pages read (or hours read)
+- Monthly activity chart showing reading days or hours per month
+- Tap "◀ 2025" to open full Reading Insights popup (requires `2-reading-insights-popup.lua` patch)
+- Display mode toggle: days vs. hours
+- Wallpaper-aware: transparent background with border, bold fonts for readability
+- Intelligent caching with automatic invalidation
+- Chart bars are tappable to view books read in that month (when patch is installed)
+
+**Settings (via Arrange Modules):**
+
+| Setting | Description |
+|---|---|
+| Show section label | Toggle "Reading Insights" header visibility |
+| Scale | Resize the card proportionally |
+| Display Mode | Choose between "Days read per month" or "Hours read per month" |
+
+**Note:** The full Reading Insights popup (opened by tapping the year) requires the `2-reading-insights-popup.lua` patch to be installed in KOReader's `patches/` folder (not in this plugin's patches folder).
+
+---
+
 ## Built-in Module Patches
 
 In addition to new modules, this plugin applies transparent patches to SimpleUI's built-in modules to add missing functionality.
@@ -136,7 +197,9 @@ The filter has no effect when the source is set to **To Be Read**.
        ├── main.lua
        ├── modules/
        │   ├── module_hero_currently.lua
-       │   └── module_recent_book_stats.lua
+       │   ├── module_recent_book_stats.lua
+       │   ├── module_reading_streaks.lua
+       │   └── module_reading_insights.lua
        └── patches/
            └── patch_coverdeck_exclude.lua
    ```
@@ -186,5 +249,6 @@ The file must return a table with `id` (string) and `apply` (function). `apply()
 - **[Bookshelf plugin](https://github.com/AndyHazz/bookshelf.koplugin)** — The hero card layout, cover proportions, progress bar style, and time-remaining calculation are all modelled after Bookshelf's hero card implementation.
 - **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
 - **[quanganhdo/koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches)** — `module_recent_book_stats.lua` is a modified version of `2-reading-stats-popup.lua` from this repository, adapted as a SimpleUI homescreen module.
+- **[zenixlabs/koreader-frankenpatches-public](https://github.com/zenixlabs/koreader-frankenpatches-public)** — `module_reading_streaks.lua` and `module_reading_insights.lua` are derived from `2-reading-insights-popup.lua` from this repository, adapted as SimpleUI homescreen modules.
 - **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI.
 
