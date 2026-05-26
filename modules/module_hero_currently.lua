@@ -267,6 +267,8 @@ local SCALE_KEY        = "hero_currently_scale"
 local SK_EXCLUDE_PATHS = "hero_currently_exclude_paths"
 local SK_SHOW_STATS    = "hero_currently_show_stats"
 local SK_SHOW_PROGRESS = "hero_currently_show_progress"
+local SK_PREVENT_CROP  = "hero_currently_prevent_crop"
+local SK_CROP_THRESHOLD = "hero_currently_crop_threshold"
 
 -- ---------------------------------------------------------------------------
 -- Exclude-path helpers (mirrors module_recent_book_stats implementation)
@@ -390,7 +392,13 @@ function M.build(w, ctx)
     local bd         = SH.getBookData(fp, prefetched)
 
     -- Cover — may be replaced by updateCovers() asynchronously
-    local cover = SH.getBookCover(fp, COVER_W, COVER_H, nil, 0.10)
+    -- Apply stretch_limit based on user settings to prevent/allow cropping.
+    local stretch_limit = nil
+    if Settings:readSetting(pfx .. SK_PREVENT_CROP) ~= false then
+        local threshold = Settings:readSetting(pfx .. SK_CROP_THRESHOLD) or 50
+        stretch_limit = threshold / 100.0
+    end
+    local cover = SH.getBookCover(fp, COVER_W, COVER_H, nil, stretch_limit)
                   or SH.coverPlaceholder(bd.title, bd.authors, COVER_W, COVER_H)
 
     local desc_text = getBookDescription(fp)
@@ -717,7 +725,7 @@ function M.build(w, ctx)
     tappable._cover_slots = {
         { container = cover_tap, idx = 1,
           fp = fp, w = COVER_W, h = COVER_H,
-          align = nil, stretch = 0.10 },
+          align = nil, stretch = stretch_limit },
     }
 
     -- Keyboard focus: border overlay
@@ -856,6 +864,45 @@ function M.getMenuItems(ctx_menu)
         toggle_item("Solid Background",  "hero_currently_solid_bg"),
         toggle_item_on("Show Progress Bar", SK_SHOW_PROGRESS),
         toggle_item("Show Statistics",   SK_SHOW_STATS),
+        toggle_item_on("Prevent Cover Cropping", SK_PREVENT_CROP),
+        {
+            text_func = function()
+                if Settings:readSetting(pfx .. SK_PREVENT_CROP) == false then
+                    return _lc("Crop Threshold (disabled)")
+                end
+                local threshold = Settings:readSetting(pfx .. SK_CROP_THRESHOLD) or 50
+                return string.format("%s (%d%%)", _lc("Crop Threshold"), threshold)
+            end,
+            enabled_func = function()
+                return Settings:readSetting(pfx .. SK_PREVENT_CROP) ~= false
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local SpinWidget = require("ui/widget/spinwidget")
+                local UIManager  = require("ui/uimanager")
+                local threshold = Settings:readSetting(pfx .. SK_CROP_THRESHOLD) or 50
+                local spin
+                spin = SpinWidget:new{
+                    title_text = _lc("Crop Threshold"),
+                    info_text  = _lc("Maximum aspect ratio distortion to prevent cropping.\n0% = always crop, 100% = never crop (allow stretching)"),
+                    value      = threshold,
+                    value_min  = 0,
+                    value_max  = 100,
+                    value_step = 5,
+                    value_hold_step = 10,
+                    unit       = "%",
+                    ok_text    = _lc("Set"),
+                    callback   = function(spin_widget)
+                        if Settings then
+                            Settings:saveSetting(pfx .. SK_CROP_THRESHOLD, spin_widget.value)
+                        end
+                        UIManager:close(spin)
+                        refresh()
+                    end,
+                }
+                UIManager:show(spin)
+            end,
+        },
 
         -- Exclude paths from recent
         {
