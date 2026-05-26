@@ -112,6 +112,21 @@ local function getCoverGapPct(pfx)
     return n and math.max(0, math.min(300, math.floor(n))) or 100
 end
 
+-- Setting key for exclude paths from recent
+local EXCLUDE_PATHS_KEY = "currently_with_pace_exclude_paths"
+
+local function getExcludePaths(pfx)
+    if not SUISettings then return {} end
+    local raw = SUISettings:readSetting(pfx .. EXCLUDE_PATHS_KEY)
+    if not raw or raw == "" then return {} end
+    local result = {}
+    for token in raw:gmatch("[^,\n]+") do
+        local t = token:match("^%s*(.-)%s*$")
+        if t ~= "" then result[#result + 1] = t end
+    end
+    return result
+end
+
 -- Maximum title length in UTF-8 characters before truncation.
 local TITLE_MAX_LEN = 60
 
@@ -453,8 +468,8 @@ local function isExcluded(fp, excludes)
 end
 
 -- Helper: get current filepath, falling back to ReadHistory when ctx.current_fp is absent
-local function _getCurrentFP(ctx, excludes)
-    excludes = excludes or {}
+local function _getCurrentFP(ctx, pfx)
+    local excludes = getExcludePaths(pfx)
     -- ctx.current_fp: honour it only when it is not excluded.
     if ctx.current_fp and not isExcluded(ctx.current_fp, excludes) then
         return ctx.current_fp
@@ -478,10 +493,6 @@ end
 function M.build(w, ctx)
     Config.applyLabelToggle(M, _("Currently Reading"))
     
-    -- Get current filepath (independent of SimpleUI's built-in "currently" module)
-    local current_fp = _getCurrentFP(ctx, {})
-    if not current_fp then return nil end
-
     local SH = getSH()
     if not SH then return nil end
 
@@ -489,6 +500,11 @@ function M.build(w, ctx)
     -- Falls back to direct reads only when called outside the homescreen.
     local c = ctx.cfg and ctx.cfg.currently_with_pace
     local pfx         = ctx.pfx
+    
+    -- Get current filepath (independent of SimpleUI's built-in "currently" module)
+    -- Respects exclude paths setting
+    local current_fp = _getCurrentFP(ctx, pfx)
+    if not current_fp then return nil end
     local scale       = c and c.scale       or Config.getModuleScale("currently_with_pace", pfx)
     local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently_with_pace", pfx)
     local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently_with_pace", pfx)
@@ -1355,6 +1371,54 @@ function M.getMenuItems(ctx_menu)
         {
             text           = _lc("Items"),
             sub_item_table = items_submenu,
+        },
+        {
+            text_func = function()
+                local raw = SUISettings:readSetting(pfx .. EXCLUDE_PATHS_KEY)
+                if not raw or raw == "" then
+                    return _lc("Exclude Paths from Recent")
+                end
+                local n = 0
+                for _ in raw:gmatch("[^,\n]+") do n = n + 1 end
+                return string.format("%s (%d)", _lc("Exclude Paths from Recent"), n)
+            end,
+            callback = function()
+                local InputDialog = require("ui/widget/inputdialog")
+                local UIManager = require("ui/uimanager")
+                local raw = SUISettings:readSetting(pfx .. EXCLUDE_PATHS_KEY) or ""
+                local dlg
+                dlg = InputDialog:new{
+                    title       = _lc("Exclude Paths from Recent"),
+                    input       = raw,
+                    input_hint  = "/mnt/onboard/rss,instapaper,cache",
+                    description = _lc("Comma-separated path fragments.\nBooks whose path contains any fragment will be skipped."),
+                    buttons     = {
+                        {
+                            {
+                                text = _("Cancel"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                id = "close",
+                                callback = function()
+                                    UIManager:close(dlg)
+                                end,
+                            },
+                            {
+                                text = _("Save"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                is_enter_default = true,
+                                callback = function()
+                                    local val = dlg:getInputText()
+                                    SUISettings:saveSetting(pfx .. EXCLUDE_PATHS_KEY, val)
+                                    UIManager:close(dlg)
+                                    refresh()
+                                end,
+                            },
+                        },
+                    },
+                }
+                UIManager:show(dlg)
+                dlg:onShowKeyboard()
+            end,
         },
     }
 end
