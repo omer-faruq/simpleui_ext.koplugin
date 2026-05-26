@@ -222,25 +222,59 @@ The filter has no effect when the source is set to **To Be Read**.
 
 ---
 
-## Adding more modules
+## Toggle System
 
-The plugin auto-discovers every file matching `module_*.lua` inside the `modules/` folder. To add a new SimpleUI-compatible module:
+**Enable/disable modules and patches** via **Tools → SimpleUI Extra**:
+- **Modules**: Enabled by default, can be disabled to improve startup performance
+- **Patches**: Disabled by default (opt-in), enable only what you need
+- **Restart required** after toggling
 
-1. Drop `module_yourname.lua` into `simpleui_ext.koplugin/modules/`.
-2. Restart KOReader — no other changes needed.
-
-The module must follow [SimpleUI's module contract](https://github.com/doctorhetfield-cmd/simpleui.koplugin) (`id`, `name`, `label`, `enabled_key`, `build(w, ctx)`, `getHeight(ctx)`, …).
+Settings stored in `settings/simpleui_ext.lua`.
 
 ---
 
-## Adding more patches
+## Adding Modules
 
-The plugin auto-discovers every file matching `patch_*.lua` inside the `patches/` folder. To add a new patch:
+**Auto-discovery**: Drop `module_yourname.lua` into `modules/` folder.
 
-1. Drop `patch_yourname.lua` into `simpleui_ext.koplugin/patches/`.
-2. Restart KOReader — no other changes needed.
+**Required fields**:
+```lua
+local M = {}
+M.id = "yourname"  -- Must match filename: module_yourname.lua
+M.name = "Your Module Name"
+M.description = "Short description for toggle menu"
+M.default_enabled = true  -- Loaded by default (optional, defaults to true)
+-- ... rest of SimpleUI module contract
+return M
+```
 
-The file must return a table with `id` (string) and `apply` (function). `apply()` is called once after all plugins have initialised, so any `require()`-able module is available. If `apply()` raises an error it is caught and logged; no other module or patch is affected.
+**Rule**: `M.id` must match filename (`module_<id>.lua`)
+
+---
+
+## Adding Patches
+
+**Auto-discovery**: Drop `patch_yourname.lua` into `patches/` folder.
+
+**Required fields**:
+```lua
+local PATCH_ID = "yourname"  -- Must match filename: patch_yourname.lua
+
+local P = {}
+P.id = PATCH_ID
+P.name = "Your Patch Name"
+P.description = "Short description for toggle menu"
+P.default_enabled = false  -- Patches default to disabled (opt-in)
+P.apply = function()
+    -- Monkey-patch code here
+end
+return P
+```
+
+**Rules**:
+- `P.id` must match filename (`patch_<id>.lua`)
+- Use `PATCH_ID` constant for consistency
+- `apply()` called once after all plugins initialize
 
 ---
 

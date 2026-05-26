@@ -297,15 +297,17 @@ end
 -- ---------------------------------------------------------------------------
 local M = {}
 
-M.id          = "hero_currently"
-M.name        = "Hero Currently Reading"
-M.label       = "Currently Reading"
-M.enabled_key = "hero_currently"
-M.default_on  = false
-M.has_covers  = true    -- activates e-ink dithering and cover poll
-M.is_book_mod = true    -- suppresses "No books opened yet" empty-state
+M.id              = "hero_currently"
+M.name            = "Hero Currently Reading"
+M.description     = "Large hero card showing currently reading book with cover, progress, and details"
+M.default_enabled = true   -- Loaded by simpleui_ext by default
+M.label           = "Currently Reading"
+M.enabled_key     = "hero_currently"
+M.default_on      = false
+M.has_covers      = true    -- activates e-ink dithering and cover poll
+M.is_book_mod     = true    -- suppresses "No books opened yet" empty-state
 -- Declare DB need so the homescreen opens a stats connection when we are active.
-M.needs       = { db = true }
+M.needs           = { db = true }
 
 -- Called by the homescreen on hot-reload to drop cached references
 function M.reset()

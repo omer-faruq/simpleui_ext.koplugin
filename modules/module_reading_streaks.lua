@@ -385,8 +385,9 @@ end
 local module = {
     id = "reading_streaks",
     name = "Reading Streaks",
+    description = "Current and best reading streaks (days and weeks)",
+    default_enabled = true,   -- Loaded by simpleui_ext by default
     label = "Reading Streaks",
-    description = "Current and best reading streaks",
     enabled_key = "reading_streaks",
     default_on = false,
 }

@@ -752,8 +752,9 @@ end
 local module = {
     id = "reading_insights",
     name = "Reading Insights",
+    description = "Yearly reading statistics and monthly chart with tappable bars",
+    default_enabled = true,   -- Loaded by simpleui_ext by default
     label = "Reading Insights",
-    description = "Yearly reading statistics and monthly chart",
     enabled_key = "reading_insights",
     default_on = false,
 }

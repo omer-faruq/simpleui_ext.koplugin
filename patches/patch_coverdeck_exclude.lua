@@ -4,8 +4,11 @@
 -- Hero Currently Reading and Recent Book Stats.
 --
 -- CONTRACT (required by main.lua's patch discovery):
---   P.id     string  — unique identifier used in log messages
---   P.apply  func()  — called once after SimpleUI has initialised; idempotent
+--   P.id              string  — unique identifier used in log messages
+--   P.apply           func()  — called once after SimpleUI has initialised; idempotent
+--   P.name            string  — display name for menu
+--   P.description     string  — help text for menu
+--   P.default_enabled bool    — first-run default (false = opt-in for patches)
 --
 -- HOW IT WORKS
 --   module_coverdeck's buildRecentFps() is a local function and cannot be
@@ -28,10 +31,17 @@
 local logger = require("logger")
 
 -- ---------------------------------------------------------------------------
-local P = {}
-P.id = "coverdeck_exclude_paths"
+-- PATCH_ID must match the filename: patch_<PATCH_ID>.lua
+-- This ID is used for:
+--   1. P.id (patch identifier for simpleui_ext toggle system)
+--   2. Settings key in SimpleUI's sui_settings.lua
+local PATCH_ID = "coverdeck_exclude"
 
-local SK_EXCLUDE = "coverdeck_exclude_paths"
+local P = {}
+P.id              = PATCH_ID
+P.name            = "Cover Deck Exclude Paths"
+P.description     = "Filter out specific paths from Cover Deck's recent books carousel"
+P.default_enabled = false  -- Opt-in: patches default to disabled
 local _applied   = false
 
 -- ---------------------------------------------------------------------------
@@ -40,7 +50,7 @@ local _applied   = false
 local function _getExcludePaths(pfx)
     local ok, SUISettings = pcall(require, "sui_store")
     if not ok or not SUISettings then return {} end
-    local raw = SUISettings:readSetting((pfx or "") .. SK_EXCLUDE)
+    local raw = SUISettings:readSetting((pfx or "") .. PATCH_ID)
     if not raw or raw == "" then return {} end
     local result = {}
     for token in raw:gmatch("[^,\n]+") do
@@ -163,7 +173,7 @@ function P.apply()
         items[#items + 1] = {
             text_func = function()
                 local raw = ok2 and SUISettings
-                            and SUISettings:readSetting(pfx .. SK_EXCLUDE)
+                            and SUISettings:readSetting(pfx .. PATCH_ID)
                 if not raw or raw == "" then
                     return _lc("Exclude Paths from Recent")
                 end
@@ -175,7 +185,7 @@ function P.apply()
                 local InputDialog = require("ui/widget/inputdialog")
                 local UIManager   = require("ui/uimanager")
                 local raw = (ok2 and SUISettings
-                             and SUISettings:readSetting(pfx .. SK_EXCLUDE)) or ""
+                             and SUISettings:readSetting(pfx .. PATCH_ID)) or ""
                 local dlg
                 dlg = InputDialog:new{
                     title       = _lc("Exclude Paths from Recent"),
@@ -194,7 +204,7 @@ function P.apply()
                             callback = function()
                                 local val = dlg:getInputText()
                                 if ok2 and SUISettings then
-                                    SUISettings:saveSetting(pfx .. SK_EXCLUDE, val)
+                                    SUISettings:saveSetting(pfx .. PATCH_ID, val)
                                 end
                                 UIManager:close(dlg)
                                 refresh()

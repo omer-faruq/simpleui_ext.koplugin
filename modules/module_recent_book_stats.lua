@@ -563,13 +563,15 @@ end
 
 local M = {}
 
-M.id          = "recent_book_stats"
-M.name        = "Recent Book Stats"
-M.label       = "Recent Book Stats"
-M.enabled_key = "recent_book_stats"
-M.default_on  = false
-M.is_book_mod = true   -- suppresses the homescreen "no books yet" empty-state
-M.needs       = { db = true }  -- request shared stats DB conn from homescreen
+M.id              = "recent_book_stats"
+M.name            = "Recent Book Stats"
+M.description     = "Statistics cards for recently read books with progress and reading time"
+M.default_enabled = true   -- Loaded by simpleui_ext by default
+M.label           = "Recent Book Stats"
+M.enabled_key     = "recent_book_stats"
+M.default_on      = false
+M.is_book_mod     = true   -- suppresses the homescreen "no books yet" empty-state
+M.needs           = { db = true }  -- request shared stats DB conn from homescreen
 
 function M.reset()
     _Config      = nil
