@@ -952,7 +952,7 @@ function M.build(w, ctx)
     }
     local tappable = InputContainer:new{
         dimen    = Geom:new{ w = w, h = content_h },
-        _fp      = ctx.current_fp,
+        _fp      = current_fp,
         _open_fn = ctx.open_fn,
         [1] = FrameContainer:new{
             bordersize    = 0,
