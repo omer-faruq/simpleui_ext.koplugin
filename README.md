@@ -255,6 +255,43 @@ Adds a brief description excerpt above or below the Cover Deck carousel, showing
 </details>
 
 <details>
+<summary><b>Module Copies</b> — Place the same module on multiple homescreen pages</summary>
+
+### Module Copies
+
+Adds a "Number of Copies" setting to all SimpleUI modules, allowing you to place the same module on multiple homescreen pages.
+
+**Features:**
+- Create 1-10 copies of any module (original + up to 9 extra copies)
+- Each copy can be independently positioned on different pages
+- Extra copies labeled as "Module Name (Copy 2)", "Copy 3", etc.
+- Existing copy positions preserved when changing copy count
+- New copies automatically added to the end of module order
+- Performance optimized with module wrapping cache
+
+**Settings (via Settings → Modules → Module Settings → [Any Module]):**
+
+| Setting | Description |
+|---|---|
+| Number of Copies | Set how many copies of this module to show (1-10, default: 1) |
+
+**Usage:**
+1. Go to **Settings → Modules → Module Settings**
+2. Select any module (e.g., "Clock", "Currently Reading")
+3. Tap **"Number of Copies"**
+4. Set the desired number (e.g., 3 for original + 2 extra copies)
+5. Go to **Arrange Modules** to position each copy on different pages
+
+**Example:**
+- Set "Clock" to 3 copies
+- Result: "Clock" (original), "Clock (Copy 2)", "Clock (Copy 3)"
+- Place original on page 1, Copy 2 on page 2, Copy 3 on page 3
+
+**Note:** This patch is disabled by default (opt-in). Enable it via **Tools → SimpleUI Extra → Patches**.
+
+</details>
+
+<details>
 <summary><b>SimpleUI Home Screen on Sleep Screen</b> — Display your homescreen as the screensaver</summary>
 
 ### SimpleUI Home Screen on Sleep Screen
@@ -327,6 +364,7 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
        └── patches/
            ├── patch_coverdeck_exclude.lua
            ├── patch_coverdeck_description.lua
+           ├── patch_module_copies.lua
            └── patch_screensaver_homescreen.lua
    ```
 
@@ -397,6 +435,7 @@ This improves startup performance by preventing the module from loading at all.
 
 - **Cover Deck — Exclude Paths from Recent** — Filter books from Cover Deck's Recent Books source
 - **Cover Deck — Description Strip** — Show book descriptions below/above the carousel
+- **Module Copies** — Place the same module on multiple homescreen pages
 - **SimpleUI Home Screen on Sleep Screen** — Display your homescreen as the screensaver
 
 **Disabling a patch:**
