@@ -157,6 +157,10 @@ function P.apply()
     local VerticalGroup     = require("ui/widget/verticalgroup")
     local VerticalSpan      = require("ui/widget/verticalspan")
     local FrameContainer    = require("ui/widget/container/framecontainer")
+    local CenterContainer   = require("ui/widget/container/centercontainer")
+    local OverlapGroup      = require("ui/widget/overlapgroup")
+    local TextBoxWidget     = require("ui/widget/textboxwidget")
+    local Font              = require("ui/font")
     local Geom              = require("ui/geometry")
     local ImageWidget       = require("ui/widget/imagewidget")
 
@@ -440,6 +444,58 @@ function P.apply()
                 end
                 _orig_paintTo(self, bb, x, y)
             end
+        end
+
+        -- Sleep screen message overlay (respects KOReader's screensaver_show_message setting).
+        local msg_text = G_reader_settings:isTrue("screensaver_show_message")
+                      and G_reader_settings:readSetting("screensaver_message")
+        if msg_text and msg_text ~= "" then
+            local face  = Font:getFace("infofont")
+            local max_w = screen_w - SIDE_PAD * 4
+            local tbw   = TextBoxWidget:new{
+                text      = msg_text,
+                face      = face,
+                width     = max_w,
+                alignment = "center",
+                fgcolor   = Blitbuffer.COLOR_BLACK,
+            }
+            -- Calling getSize() ensures _bb is rendered.
+            local tbh = tbw:getSize().h
+            -- Build a custom widget that multiply-blits the text BB onto the
+            -- destination.  Multiply blend: white source = transparent (dest unchanged),
+            -- dark source = darkens destination.  This gives perfectly transparent
+            -- text without any white box, regardless of wallpaper.
+            local mul_widget = {
+                _tbw = tbw,
+                _w   = max_w,
+                _h   = tbh,
+                getSize  = function(s) return Geom:new{ w = s._w, h = s._h } end,
+                paintTo  = function(s, dst_bb, x, y)
+                    if s._tbw and s._tbw._bb then
+                        dst_bb:blitFrom(s._tbw._bb, x, y, 0, 0, s._w, s._h,
+                                        dst_bb.setPixelMultiply)
+                    end
+                end,
+                free = function(s)
+                    if s._tbw then
+                        pcall(function() s._tbw:free() end)
+                        s._tbw = nil
+                    end
+                end,
+            }
+            local bottom_margin = Screen:scaleBySize(24)
+            local msg_y = screen_h - tbh - bottom_margin
+            local msg_at_bottom = CenterContainer:new{
+                dimen          = Geom:new{ w = screen_w, h = tbh },
+                overlap_offset = { 0, msg_y },
+                mul_widget,
+            }
+            content = OverlapGroup:new{
+                dimen           = Geom:new{ w = screen_w, h = screen_h },
+                allow_mirroring = false,
+                content,
+                msg_at_bottom,
+            }
         end
 
         return content
