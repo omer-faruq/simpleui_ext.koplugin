@@ -182,6 +182,50 @@ local function getMonthlyReadingDays(year)
     end)
 end
 
+local function getLast12MonthsReadingDays()
+    local months = {}
+    return withStatsDb(months, function(conn)
+        local current_date = os.date("*t")
+        local current_year = current_date.year
+        local current_month = current_date.month
+        
+        local results = {}
+        withStatement(conn, [[
+            SELECT strftime('%Y-%m', start_time, 'unixepoch', 'localtime') AS month,
+                   COUNT(DISTINCT date(start_time, 'unixepoch', 'localtime')) AS days_read
+            FROM page_stat
+            GROUP BY month ORDER BY month ASC
+        ]], function(stmt)
+            for row in stmt:rows() do
+                results[row[1]] = row[2]
+            end
+        end)
+        
+        for i = 11, 0, -1 do
+            local target_month = current_month - i
+            local target_year = current_year
+            
+            while target_month <= 0 do
+                target_month = target_month + 12
+                target_year = target_year - 1
+            end
+            
+            local year_month = string.format("%04d-%02d", target_year, target_month)
+            local days = tonumber(results[year_month]) or 0
+            table.insert(months, {
+                month = year_month,
+                days = days,
+                label = MONTH_NAMES_SHORT[target_month],
+                label_full = MONTH_NAMES_FULL[target_month],
+                month_num = target_month,
+                year = target_year
+            })
+        end
+        
+        return months
+    end)
+end
+
 local function getMonthlyReadingHours(year)
     local months = {}
     return withStatsDb(months, function(conn)
@@ -227,6 +271,59 @@ local function getMonthlyReadingHours(year)
     end)
 end
 
+local function getLast12MonthsReadingHours()
+    local months = {}
+    return withStatsDb(months, function(conn)
+        local current_date = os.date("*t")
+        local current_year = current_date.year
+        local current_month = current_date.month
+        
+        local results = {}
+        withStatement(conn, [[
+            SELECT dates AS month, SUM(sum_duration) / 3600.0 AS hours_read
+            FROM (
+                SELECT strftime('%Y-%m', start_time, 'unixepoch', 'localtime') AS dates,
+                       sum(duration) AS sum_duration
+                FROM page_stat
+                GROUP BY id_book, page, dates
+            )
+            GROUP BY dates ORDER BY dates ASC
+        ]], function(stmt)
+            for row in stmt:rows() do
+                results[row[1]] = row[2]
+            end
+        end)
+        
+        for i = 11, 0, -1 do
+            local target_month = current_month - i
+            local target_year = current_year
+            
+            while target_month <= 0 do
+                target_month = target_month + 12
+                target_year = target_year - 1
+            end
+            
+            local year_month = string.format("%04d-%02d", target_year, target_month)
+            local hours = tonumber(results[year_month]) or 0
+            if hours >= 1 then
+                hours = math.floor(hours)
+            elseif hours > 0 then
+                hours = (math.floor(hours * 10)) / 10
+            end
+            table.insert(months, {
+                month = year_month,
+                hours = hours,
+                label = MONTH_NAMES_SHORT[target_month],
+                label_full = MONTH_NAMES_FULL[target_month],
+                month_num = target_month,
+                year = target_year
+            })
+        end
+        
+        return months
+    end)
+end
+
 local function getSelectedYear(pfx)
     local Settings = ReadingInsightsDatabase
     local key = (pfx or "") .. "reading_insights_selected_year"
@@ -240,23 +337,117 @@ local function setSelectedYear(pfx, year)
     Settings:flush()
 end
 
+local SK_MODE = "rinsights_mode"
+local SK_TAPPABLE = "rinsights_tappable"
+local SK_YEAR_MODE = "rinsights_year_mode"
+local MODE_DAYS = "days"
+local MODE_HOURS = "hours"
+local YEAR_MODE_BASED = "year_based"
+local YEAR_MODE_LAST12 = "last_12_months"
+
+local getSettings
+
+local function getYearMode(pfx)
+    local S = getSettings()
+    local v = S and S:readSetting(pfx .. SK_YEAR_MODE)
+    return (v == YEAR_MODE_LAST12) and YEAR_MODE_LAST12 or YEAR_MODE_BASED
+end
+
+local function getLast12MonthsStats()
+    local stats = { days = 0, pages = 0, duration = 0 }
+    return withStatsDb(stats, function(conn)
+        local current_date = os.date("*t")
+        local current_year = current_date.year
+        local current_month = current_date.month
+        
+        local start_month = current_month - 11
+        local start_year = current_year
+        while start_month <= 0 do
+            start_month = start_month + 12
+            start_year = start_year - 1
+        end
+        
+        local start_date = string.format("%04d-%02d-01", start_year, start_month)
+        local end_year = current_year
+        local end_month = current_month + 1
+        if end_month > 12 then
+            end_month = 1
+            end_year = end_year + 1
+        end
+        local end_date = string.format("%04d-%02d-01", end_year, end_month)
+        
+        withStatement(conn, string.format([[
+            SELECT COUNT(DISTINCT date(start_time, 'unixepoch', 'localtime'))
+            FROM page_stat
+            WHERE date(start_time, 'unixepoch', 'localtime') >= '%s'
+              AND date(start_time, 'unixepoch', 'localtime') < '%s'
+        ]], start_date, end_date), function(stmt)
+            for row in stmt:rows() do
+                stats.days = tonumber(row[1]) or 0
+            end
+        end)
+        
+        withStatement(conn, string.format([[
+            SELECT count(*) FROM (
+                SELECT 1 FROM page_stat
+                WHERE date(start_time, 'unixepoch', 'localtime') >= '%s'
+                  AND date(start_time, 'unixepoch', 'localtime') < '%s'
+                GROUP BY id_book, page
+            )
+        ]], start_date, end_date), function(stmt)
+            for row in stmt:rows() do
+                stats.pages = tonumber(row[1]) or 0
+            end
+        end)
+        
+        withStatement(conn, string.format([[
+            SELECT sum(duration) FROM page_stat
+            WHERE date(start_time, 'unixepoch', 'localtime') >= '%s'
+              AND date(start_time, 'unixepoch', 'localtime') < '%s'
+        ]], start_date, end_date), function(stmt)
+            for row in stmt:rows() do
+                stats.duration = tonumber(row[1]) or 0
+            end
+        end)
+        
+        return stats
+    end)
+end
+
 local function getInsightsData(pfx)
     clearCacheIfRequired()
-    local selected_year = getSelectedYear(pfx)
+    local year_mode = getYearMode(pfx)
     
-    local yearlyStats = (insightsCache.yearlyStats and insightsCache.yearlyStats[selected_year])
-        or getYearlyStats(selected_year)
-    local monthlyDays = (insightsCache.monthlyReadingDays and insightsCache.monthlyReadingDays[selected_year])
-        or getMonthlyReadingDays(selected_year)
-    local monthlyHours = (insightsCache.monthlyReadingHours and insightsCache.monthlyReadingHours[selected_year])
-        or getMonthlyReadingHours(selected_year)
-    
-    return {
-        year = selected_year,
-        yearlyStats = yearlyStats,
-        monthlyReadingDays = monthlyDays,
-        monthlyReadingHours = monthlyHours,
-    }
+    if year_mode == YEAR_MODE_LAST12 then
+        local yearlyStats = getLast12MonthsStats()
+        local monthlyDays = getLast12MonthsReadingDays()
+        local monthlyHours = getLast12MonthsReadingHours()
+        
+        return {
+            year = nil,
+            yearlyStats = yearlyStats,
+            monthlyReadingDays = monthlyDays,
+            monthlyReadingHours = monthlyHours,
+            year_mode = YEAR_MODE_LAST12,
+        }
+    else
+        local selected_year = getSelectedYear(pfx)
+        
+        local yearlyStats = (insightsCache.yearlyStats and insightsCache.yearlyStats[selected_year])
+            or getYearlyStats(selected_year)
+        local monthlyDays = (insightsCache.monthlyReadingDays and insightsCache.monthlyReadingDays[selected_year])
+            or getMonthlyReadingDays(selected_year)
+        local monthlyHours = (insightsCache.monthlyReadingHours and insightsCache.monthlyReadingHours[selected_year])
+            or getMonthlyReadingHours(selected_year)
+        
+        return {
+            year = selected_year,
+            yearlyStats = yearlyStats,
+            monthlyReadingDays = monthlyDays,
+            monthlyReadingHours = monthlyHours,
+            year_mode = YEAR_MODE_BASED,
+        }
+    end
 end
 
 local _Config, _SUISettings, _UI, _SUIStyle
@@ -269,7 +460,7 @@ local function getConfig()
     return _Config
 end
 
-local function getSettings()
+function getSettings()
     if not _SUISettings then
         local ok, m = pcall(require, "sui_store")
         if ok and m then _SUISettings = m end
@@ -292,11 +483,6 @@ local function getStyle()
     end
     return _SUIStyle
 end
-
-local SK_MODE = "rinsights_mode"
-local SK_TAPPABLE = "rinsights_tappable"
-local MODE_DAYS = "days"
-local MODE_HOURS = "hours"
 
 local function getMode(pfx)
     local S = getSettings()
@@ -492,7 +678,7 @@ local function showBooksForMonth(year_month, month_label)
     UIManager:show(menu)
 end
 
-local function buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, has_wp, UI)
+local function buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, has_wp, UI, year_mode, selected_year)
     if #monthly_data == 0 then
         return nil
     end
@@ -514,8 +700,9 @@ local function buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, 
     local label_height = sample_label:getSize().h
     sample_label:free()
     
-    local current_year = tonumber(os.date("%Y"))
+    local current_year_num = tonumber(os.date("%Y"))
     local current_month = os.date("%Y-%m")
+    local display_year = year_mode == YEAR_MODE_LAST12 and current_year_num or selected_year
     
     local function createBarRow(data_slice)
         local bars_row = HorizontalGroup:new{ align = "bottom" }
@@ -545,6 +732,10 @@ local function buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, 
                 align = "center",
             }
             table.insert(bar_column, centered_label)
+            table.insert(bar_column, LineWidget:new{
+                dimen = Geom:new{ w = bar_width, h = Size.line.thin },
+                background = Blitbuffer.COLOR_BLACK,
+            })
             if bar_h > 0 then
                 table.insert(bar_column, LineWidget:new{
                     dimen = Geom:new{ w = bar_width, h = bar_h },
@@ -567,7 +758,8 @@ local function buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, 
                     bar_container,
                 }
                 local month_data = m
-                local month_year_label = m.label_full .. " " .. current_year
+                local month_year = m.year or display_year
+                local month_year_label = m.label_full .. " " .. month_year
                 tappable_bar.ges_events = {
                     Tap = {
                         GestureRange:new{
@@ -632,6 +824,7 @@ end
 
 local function buildInsightsWidget(w, ctx, data)
     local selected_year = data.year or tonumber(os.date("%Y"))
+    local year_mode = data.year_mode or YEAR_MODE_BASED
     local stats = data.yearlyStats or { days = 0, pages = 0, duration = 0 }
     local mode = getMode(ctx.pfx)
     local monthly_data = mode == MODE_HOURS and data.monthlyReadingHours or data.monthlyReadingDays
@@ -649,14 +842,29 @@ local function buildInsightsWidget(w, ctx, data)
     
     local current_year = tonumber(os.date("%Y"))
     
+    local year_text_str
+    if year_mode == YEAR_MODE_LAST12 then
+        local current_date = os.date("*t")
+        local current_month = current_date.month
+        local start_year = current_month <= 11 and (current_year - 1) or current_year
+        
+        if start_year == current_year then
+            year_text_str = tostring(current_year) .. " (combined)"
+        else
+            year_text_str = tostring(start_year) .. "-" .. tostring(current_year)
+        end
+    else
+        year_text_str = tostring(selected_year)
+    end
+    
     local year_text = TextWidget:new{
-        text = tostring(selected_year),
+        text = year_text_str,
         face = year_font,
         bold = true,
     }
     
     local year_display
-    if selected_year == current_year and current_year > 2010 then
+    if year_mode == YEAR_MODE_BASED and selected_year == current_year and current_year > 2010 then
         local prev_year_text = TextWidget:new{
             text = "◀ " .. tostring(current_year - 1),
             face = year_font,
@@ -684,7 +892,7 @@ local function buildInsightsWidget(w, ctx, data)
     end
     
     local year_widget
-    if selected_year == current_year and current_year > 2010 then
+    if (year_mode == YEAR_MODE_BASED and selected_year == current_year and current_year > 2010) or year_mode == YEAR_MODE_LAST12 then
         local year_h = year_display:getSize().h
         local tappable_overlay = InputContainer:new{
             dimen = Geom:new{ w = content_width, h = year_h },
@@ -720,16 +928,19 @@ local function buildInsightsWidget(w, ctx, data)
     end
     
     local stats_row = buildYearlyStatsRow(ctx, stats, mode, content_width, has_wp, UI)
-    local chart = buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, has_wp, UI)
+    local chart = buildMonthlyChart(ctx, monthly_data, mode, content_width, scale, has_wp, UI, year_mode, selected_year)
     
     local inner_content = VerticalGroup:new{
         align = "left",
         year_widget,
         VerticalSpan:new{ height = Size.padding.default },
         stats_row,
-        VerticalSpan:new{ height = Size.padding.large },
-        chart,
     }
+    
+    if chart then
+        table.insert(inner_content, VerticalSpan:new{ height = Size.padding.large })
+        table.insert(inner_content, chart)
+    end
     
     local content = HorizontalGroup:new{
         align = "center",
@@ -766,11 +977,22 @@ function module.build(w, ctx)
     end
     
     local ok, data = pcall(getInsightsData, ctx.pfx)
-    if not ok or not data or not data.yearlyStats then
+    if not ok then
+        logger.warn("Reading Insights: Error getting data:", data)
+        return nil
+    end
+    if not data or not data.yearlyStats then
+        logger.warn("Reading Insights: No data or yearlyStats")
         return nil
     end
     
-    return buildInsightsWidget(w, ctx, data)
+    local ok_widget, widget = pcall(buildInsightsWidget, w, ctx, data)
+    if not ok_widget then
+        logger.warn("Reading Insights: Error building widget:", widget)
+        return nil
+    end
+    
+    return widget
 end
 
 function module.invalidateCache()
@@ -819,6 +1041,27 @@ function module.getMenuItems(ctx_menu)
                     checked_func = function() return getMode(pfx) == MODE_HOURS end,
                     callback = function()
                         if S then S:saveSetting(pfx .. SK_MODE, MODE_HOURS) S:flush() end
+                        refresh()
+                    end,
+                },
+            },
+        },
+        {
+            text = _lc("Year Display Mode"),
+            sub_item_table = {
+                {
+                    text = _lc("Year based"),
+                    checked_func = function() return getYearMode(pfx) == YEAR_MODE_BASED end,
+                    callback = function()
+                        if S then S:saveSetting(pfx .. SK_YEAR_MODE, YEAR_MODE_BASED) S:flush() end
+                        refresh()
+                    end,
+                },
+                {
+                    text = _lc("Last 12 months"),
+                    checked_func = function() return getYearMode(pfx) == YEAR_MODE_LAST12 end,
+                    callback = function()
+                        if S then S:saveSetting(pfx .. SK_YEAR_MODE, YEAR_MODE_LAST12) S:flush() end
                         refresh()
                     end,
                 },
