@@ -205,6 +205,10 @@ local function _truncateToLines(text, width, face, max_lines, cache_key)
         words[#words + 1] = word
     end
     
+    -- Apply safety margin to prevent overflow on different devices (Android vs Kobo)
+    -- Font rendering can vary slightly, so we use 95% of available width
+    local safe_width = math.floor(width * 0.95)
+    
     local lines = {}
     local current_line = ""
     local line_count = 0
@@ -213,9 +217,9 @@ local function _truncateToLines(text, width, face, max_lines, cache_key)
     while word_idx <= #words do
         local word = words[word_idx]
         local test_line = current_line == "" and word or (current_line .. " " .. word)
-        local w = RenderText:sizeUtf8Text(0, width, face, test_line, true).x
+        local w = RenderText:sizeUtf8Text(0, safe_width, face, test_line, true).x
         
-        if w <= width then
+        if w <= safe_width then
             current_line = test_line
             word_idx = word_idx + 1
         else
