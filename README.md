@@ -203,6 +203,61 @@ Enhanced version of SimpleUI's built-in Currently Reading module with additional
 
 </details>
 
+<details>
+<summary><b>Currently Reading (Yanllsama)</b> — Enhanced reading dashboard with dynamic grid, customizable headers, and rich statistics</summary>
+
+### Currently Reading (Yanllsama)
+
+A completely redesigned, highly detailed, and fully dynamic reading statistics dashboard module with enriched data, brand new progress bar designs, dynamic grid management, and flexible interface options.
+
+```
+┌─────────────────────────────────────────────┐
+│ ┌──────┐  The Name of the Wind              │
+│ │      │  Patrick Rothfuss                  │
+│ │Cover │                                     │
+│ │      │  ┌─────────┬─────────┬─────────┐   │
+│ └──────┘  │THIS BOOK│  SPEED  │ EXTRA 1 │   │
+│           │ 2h left │ 0.8pg/m │ 21 days │   │
+│           │ 199 pg  │ 45m/day │ 6d left │   │
+│           └─────────┴─────────┴─────────┘   │
+│           ████████████░░░░░ 73%             │
+└─────────────────────────────────────────────┘
+```
+
+**Features:**
+- **Fully Dynamic Grid System:** Freely determine layout with 1-4 columns and 1-6 rows
+- **4 Customizable Category Headers:** Change header text (e.g., "THIS BOOK", "SPEED", "EXTRA 1"), adjust thickness, or hide completely
+- **Rich Statistics (10 metrics):**
+  - Time Left & Time Spent
+  - Pages Read & Pages Left
+  - Days Reading & Days to Go
+  - Daily Average & Pages/Minute Speed
+  - Mins/Session & Last Session Pages
+- **Advanced Progress Bars (6 styles):** Simple, With percentage, Bold, Minimal, Outline, Segmented
+- **Full Control (Edit Items):** Show/hide any statistic, rearrange display order with drag-and-drop
+- **Smart Info Screen:** Tap book/author name to view full book description
+- **Flexible Font & Size Controls:** Customize fonts and sizes for title, author, values, and labels
+- **Time Format Options:** Readable (e.g., 3.5 hours) or XhYm (e.g., 3h 30 min)
+
+**Settings (via Arrange Modules):**
+
+| Setting | Description |
+|---|---|
+| Scale | Resize the card proportionally |
+| Cover size | Scale for the cover thumbnail only |
+| Cover Spacing | Horizontal space between cover and text (0-300%) |
+| Grid Dimensions | Set columns (1-4) and rows (1-6) for statistics layout |
+| Category Headers | Customize header text for each column, adjust thickness (thin/medium/bold), or hide |
+| Edit Items | Toggle visibility of individual statistics and sort their display order |
+| Progress bar style | Choose from 6 different bar designs |
+| Time Format | Readable or XhYm format |
+| Font Settings | Customize fonts and sizes for title, author, values, and labels |
+| Exclude Paths from Recent | Comma-separated path fragments to skip certain books |
+
+**Note:** This is an opt-in module (disabled by default). Enable it via **Tools → SimpleUI Extra → Modules**. Based on [yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading).
+
+</details>
+
 ---
 
 ## Built-in Patches
@@ -360,7 +415,8 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
        │   ├── module_recent_book_stats.lua
        │   ├── module_reading_streaks.lua
        │   ├── module_reading_insights.lua
-       │   └── module_currently_with_pace.lua
+       │   ├── module_currently_with_pace.lua
+       │   └── module_currently_yanllsama.lua
        └── patches/
            ├── patch_coverdeck_exclude.lua
            ├── patch_coverdeck_description.lua
@@ -529,5 +585,6 @@ return P
 - **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
 - **[quanganhdo/koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches)** — `module_recent_book_stats.lua` is a modified version of `2-reading-stats-popup.lua` from this repository, adapted as a SimpleUI homescreen module.
 - **[zenixlabs/koreader-frankenpatches-public](https://github.com/zenixlabs/koreader-frankenpatches-public)** — `module_reading_streaks.lua` and `module_reading_insights.lua` are derived from `2-reading-insights-popup.lua` from this repository, adapted as SimpleUI homescreen modules.
+- **[yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading)** — `module_currently_yanllsama.lua` is based on Yanllsama's enhanced Currently Reading module with dynamic grid system, customizable headers, and rich statistics.
 - **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI.
 
