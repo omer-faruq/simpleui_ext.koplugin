@@ -60,16 +60,14 @@ function patch.apply()
     local SpinWidget = require("ui/widget/spinwidget")
     local Blitbuffer = require("ffi/blitbuffer")
 
-    local modules_wrapped = false
-
     local original_list = Registry.list
     Registry.list = function()
         local mods = original_list()
         
-        if not modules_wrapped then
-            local _ = require("gettext")
-            
-            for i, mod in ipairs(mods) do
+        local _ = require("gettext")
+        
+        for i, mod in ipairs(mods) do
+            if not mod._module_copies_enhanced then
                 local original_getMenuItems = mod.getMenuItems
                 
                 local function enhanceModuleMenuItems(ctx_menu)
@@ -189,9 +187,8 @@ function patch.apply()
                 end
                 
                 mod.getMenuItems = enhanceModuleMenuItems
+                mod._module_copies_enhanced = true
             end
-            
-            modules_wrapped = true
         end
         
         return mods
