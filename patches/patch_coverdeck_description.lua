@@ -260,7 +260,7 @@ local function _buildFps(ctx)
 end
 
 -- ---------------------------------------------------------------------------
--- _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S)
+-- _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale)
 --
 -- Builds the tappable description widget.  Returns:
 --   dtap         InputContainer  — the tappable strip
@@ -446,41 +446,31 @@ function P.apply()
         -- Build the tappable description strip
         local dtap, _strip_h = _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale)
 
-        -- Indent to match the carousel's inner_w (w - PAD*2) using a plain
-        -- HorizontalGroup — no FrameContainer so there is zero background fill.
-        local HorizontalGroup = require("ui/widget/horizontalgroup")
-        local HorizontalSpan  = require("ui/widget/horizontalspan")
-        local VerticalGroup   = require("ui/widget/verticalgroup")
-        local VerticalSpan    = require("ui/widget/verticalspan")
-
+        -- Inject description into carousel's internal structure.
+        -- Carousel is a FrameContainer containing a VerticalGroup.
+        -- We need to add description to that VerticalGroup.
         local Device  = require("device")
         local Screen  = Device.screen
         local ok_ui2, UI2 = pcall(require, "sui_core")
-        local PAD  = ok_ui2 and UI2 and UI2.PAD  or Screen:scaleBySize(8)
         local PAD2 = ok_ui2 and UI2 and UI2.PAD2 or Screen:scaleBySize(4)
+        local VerticalSpan = require("ui/widget/verticalspan")
 
-        local desc_row = HorizontalGroup:new{
-            HorizontalSpan:new{ width = PAD },
-            dtap,
-        }
-
-        local position  = _getPosition(pfx, S)
-        local final_vg  = VerticalGroup:new{ align = "left" }
-
-        if position == "above" then
-            final_vg[#final_vg + 1] = desc_row
-            final_vg[#final_vg + 1] = VerticalSpan:new{ width = PAD2 }
-            final_vg[#final_vg + 1] = carousel
-        else  -- "below" (default)
-            final_vg[#final_vg + 1] = carousel
-            final_vg[#final_vg + 1] = VerticalSpan:new{ width = PAD2 }
-            final_vg[#final_vg + 1] = desc_row
+        -- carousel is a FrameContainer, carousel[1] is the VerticalGroup
+        local vg = carousel[1]
+        if vg then
+            local position = _getPosition(pfx, S)
+            if position == "above" then
+                -- Insert at the beginning
+                table.insert(vg, 1, dtap)
+                table.insert(vg, 2, VerticalSpan:new{ width = PAD2 })
+            else  -- "below" (default)
+                -- Append at the end
+                vg[#vg + 1] = VerticalSpan:new{ width = PAD2 }
+                vg[#vg + 1] = dtap
+            end
         end
 
-        -- Forward _cover_slots so updateCovers() keeps working
-        final_vg._cover_slots = carousel._cover_slots
-
-        return final_vg
+        return carousel
     end
 
     -- ── wrap getMenuItems() ───────────────────────────────────────────────
