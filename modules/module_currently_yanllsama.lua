@@ -158,6 +158,45 @@ local function getHeaderTxt(pfx, col_idx)
 end
 local function getHeaderWeight(pfx) return SUISettings:readSetting(pfx .. HEADER_WEIGHT_KEY) or "bold" end
 
+local function getExcludePaths(pfx)
+    if not SUISettings then return {} end
+    local raw = SUISettings:readSetting(pfx .. SK_EXCLUDE_PATHS)
+    if not raw or raw == "" then return {} end
+    local result = {}
+    for token in raw:gmatch("[^,\n]+") do
+        local t = token:match("^%s*(.-)%s*$")
+        if t ~= "" then result[#result + 1] = t end
+    end
+    return result
+end
+
+local function isExcluded(fp, excludes)
+    if not fp or #excludes == 0 then return false end
+    for _, frag in ipairs(excludes) do
+        if fp:find(frag, 1, true) then return true end
+    end
+    return false
+end
+
+local function _getCurrentFP(ctx, pfx)
+    local excludes = getExcludePaths(pfx)
+    if ctx.current_fp and not isExcluded(ctx.current_fp, excludes) then
+        return ctx.current_fp
+    end
+    local ok, RH = pcall(require, "readhistory")
+    if not ok or not RH then return nil end
+    if not (RH.hist and #RH.hist > 0) then
+        pcall(function() RH:reload() end)
+    end
+    if not RH.hist then return nil end
+    for _, e in ipairs(RH.hist) do
+        if e and e.file and not isExcluded(e.file, excludes) then
+            return e.file
+        end
+    end
+    return nil
+end
+
 local function getActiveStatsDict(pfx)
     local d = SUISettings:readSetting(pfx .. ACTIVE_STATS_KEY)
     if type(d) ~= "table" then
@@ -494,43 +533,11 @@ function M.reset()
     _SH = nil; _SUIStyle = nil; _cache = nil
 end
 
-function M.build(w, ctx)
-    Config.applyLabelToggle(M, _("Currently Reading"))
-    if not ctx.current_fp then return nil end
-
-    local SH = getSH()
-    if not SH then return nil end
-
-    local c     = ctx.cfg and ctx.cfg.currently_yanllsama
-    local pfx   = ctx.pfx or ""
-    local scale = c and c.scale or Config.getModuleScale("currently_yanllsama", pfx)
-    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently_yanllsama", pfx)
-    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently_yanllsama", pfx)
-    local bar_style   = c and c.bar_style   or getBarStyle(pfx)
-    
-    local cols = getGridCols(pfx)
-    local rows = getGridRows(pfx)
-
-    local D = SH.getDims(scale, thumb_scale)
-    
+local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows)
     local cover_gap      = math.max(0, math.floor(_BASE_COVER_GAP      * scale * (getCoverGapPct(pfx) / 100)))
     local bar_gap_before = math.max(1, math.floor(_BASE_BAR_GAP_BEFORE * scale))
     local bar_h          = math.max(1, math.floor(_BASE_BAR_H          * scale))
     local author_gap     = math.max(1, math.floor(_BASE_AUTHOR_GAP     * scale))
-
-    local prefetched_entry = ctx.prefetched and ctx.prefetched[ctx.current_fp]
-    local bd    = SH.getBookData(ctx.current_fp, prefetched_entry)
-    local cover = SH.getBookCover(ctx.current_fp, D.COVER_W, D.COVER_H, nil, 0.10)
-                  or SH.coverPlaceholder(bd.title, bd.authors, D.COVER_W, D.COVER_H)
-
-    local stats = cacheGet(ctx.current_fp, pfx)
-    if not stats then
-        local book_meta = {
-            fp = ctx.current_fp, title = bd.title or "", md5 = prefetched_entry and prefetched_entry.partial_md5_checksum, percent = bd.percent or 0, pages = bd.pages or 0
-        }
-        stats = gatherStats(book_meta, pfx, ctx.db_conn)
-        cachePut(ctx.current_fp, pfx, stats)
-    end
 
     local _CLR_DARK_EFF = _CLR_DARK
     local CLR_TEXT_SUB_EFF = CLR_TEXT_SUB
@@ -1082,14 +1089,84 @@ function M.getMenuItems(ctx_menu)
             callback = function()
                 local InputDialog = require("ui/widget/inputdialog")
                 local raw = SUISettings:readSetting(pfx .. SK_EXCLUDE_PATHS) or ""
-                local dlg; dlg = InputDialog:new{
-                    title       = _lc("Exclude Paths from Recents"), input       = raw, input_hint  = "/mnt/onboard/rss, instapaper", description = _lc("Comma separated path fragments.\nBooks containing any of these fragments in their path will be skipped."), allow_newline = false,
-                    buttons = {{ text = _lc("Cancel"), callback = function() UIManager:close(dlg) end }, { text = _lc("Save"), is_enter_default = true, callback = function() SUISettings:saveSetting(pfx .. SK_EXCLUDE_PATHS, dlg:getInputText()); _cache = nil; UIManager:close(dlg); refresh() end }},
+                local dlg
+                dlg = InputDialog:new{
+                    title       = _lc("Exclude Paths from Recents"),
+                    input       = raw,
+                    input_hint  = "/mnt/onboard/rss, instapaper",
+                    description = _lc("Comma separated path fragments.\nBooks containing any of these fragments in their path will be skipped."),
+                    allow_newline = false,
+                    buttons = {
+                        {
+                            {
+                                text = _lc("Cancel"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                callback = function()
+                                    UIManager:close(dlg)
+                                end,
+                            },
+                            {
+                                text = _lc("Save"),
+                                background = Blitbuffer.COLOR_WHITE,
+                                is_enter_default = true,
+                                callback = function()
+                                    SUISettings:saveSetting(pfx .. SK_EXCLUDE_PATHS, dlg:getInputText())
+                                    _cache = nil
+                                    UIManager:close(dlg)
+                                    refresh()
+                                end,
+                            },
+                        },
+                    },
                 }
-                UIManager:show(dlg) dlg:onShowKeyboard()
+                UIManager:show(dlg)
+                dlg:onShowKeyboard()
             end,
         },
     }
+end
+
+function M.build(w, ctx)
+    Config.applyLabelToggle(M, _("Currently Reading"))
+
+    local SH = getSH()
+    if not SH then return nil end
+
+    local c     = ctx.cfg and ctx.cfg.currently_yanllsama
+    local pfx   = ctx.pfx or ""
+    
+    local current_fp = _getCurrentFP(ctx, pfx)
+    if not current_fp then return nil end
+    
+    local scale = c and c.scale or Config.getModuleScale("currently_yanllsama", pfx)
+    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently_yanllsama", pfx)
+    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently_yanllsama", pfx)
+    local bar_style   = c and c.bar_style   or getBarStyle(pfx)
+    
+    local cols = getGridCols(pfx)
+    local rows = getGridRows(pfx)
+
+    local D = SH.getDims(scale, thumb_scale)
+    
+    local prefetched_entry = ctx.prefetched and ctx.prefetched[current_fp]
+    local bd    = SH.getBookData(current_fp, prefetched_entry)
+    local cover = SH.getBookCover(current_fp, D.COVER_W, D.COVER_H, nil, 0.10)
+                  or SH.coverPlaceholder(bd.title, bd.authors, D.COVER_W, D.COVER_H)
+
+    local stats = cacheGet(current_fp, pfx)
+    if not stats then
+        local book_meta = {
+            fp = current_fp,
+            title = bd.title or "",
+            md5 = prefetched_entry and prefetched_entry.partial_md5_checksum,
+            percent = bd.percent or 0,
+            pages = bd.pages or 0
+        }
+        stats = gatherStats(book_meta, pfx, ctx.db_conn)
+        cachePut(current_fp, pfx, stats)
+    end
+
+    return _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows)
 end
 
 return M
