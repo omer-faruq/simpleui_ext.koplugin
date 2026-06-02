@@ -46,11 +46,13 @@
 --   No merging of the two patches is required.
 --
 -- SETTING KEYS  (all prefixed with ctx.pfx at runtime)
---   coverdeck_desc_enabled   bool    — master toggle (default off)
---   coverdeck_desc_position  string  — "above" | "below" (default "below")
---   coverdeck_desc_align     string  — "left"|"center"|"right"|"justify" (default "center")
---   coverdeck_desc_max_len   number  — max characters in strip (default 500)
---   coverdeck_desc_font_size number  — base font size in pt (default 8; multiplied by module scale)
+--   coverdeck_desc_enabled    bool    — master toggle (default off)
+--   coverdeck_desc_position   string  — "above" | "below" (default "below")
+--   coverdeck_desc_align      string  — "left"|"center"|"right"|"justify" (default "center")
+--   coverdeck_desc_limit_mode string  — "max_length" | "fixed_lines" (default "max_length")
+--   coverdeck_desc_max_len    number  — max characters in strip (default 500, only used when limit_mode = "max_length")
+--   coverdeck_desc_line_count number  — fixed line count (1-5, default 3, only used when limit_mode = "fixed_lines")
+--   coverdeck_desc_font_size  number  — base font size in pt (default 8; multiplied by module scale)
 
 local logger = require("logger")
 
@@ -67,16 +69,32 @@ P.name            = "Cover Deck Description"
 P.description     = "Show the active book's description below (or above) the Cover Deck carousel"
 P.default_enabled = false  -- Opt-in: patches default to disabled
 
-local SK_ENABLED   = "coverdeck_desc_enabled"
-local SK_POSITION  = "coverdeck_desc_position"
-local SK_ALIGN     = "coverdeck_desc_align"
-local SK_MAX_LEN   = "coverdeck_desc_max_len"
-local SK_FONT_SIZE = "coverdeck_desc_font_size"
+local SK_ENABLED    = "coverdeck_desc_enabled"
+local SK_POSITION   = "coverdeck_desc_position"
+local SK_ALIGN      = "coverdeck_desc_align"
+local SK_LIMIT_MODE = "coverdeck_desc_limit_mode"
+local SK_MAX_LEN    = "coverdeck_desc_max_len"
+local SK_LINE_COUNT = "coverdeck_desc_line_count"
+local SK_FONT_SIZE  = "coverdeck_desc_font_size"
 
 local MAX_RECENT_FPS = 10   -- must match module_coverdeck's constant
-local STRIP_LINES    = 3    -- visual line cap for the description strip
+local STRIP_LINES    = 3    -- default visual line cap for the description strip (when limit_mode = "max_length")
 
 local _applied = false
+
+-- Cache for truncated descriptions to avoid expensive re-calculation
+-- Key: filepath .. "|" .. width .. "|" .. font_size .. "|" .. max_lines
+-- Value: truncated text
+-- Max 20 entries to prevent memory bloat
+local _truncate_cache = {}
+local _cache_count = 0
+local _cache_max_size = 20
+
+-- Cache invalidation: clear when settings change
+local function _clearCache()
+    _truncate_cache = {}
+    _cache_count = 0
+end
 
 -- ---------------------------------------------------------------------------
 -- Settings helpers
@@ -99,9 +117,18 @@ local function _getAlign(pfx, S)
     return (S and S:readSetting(pfx .. SK_ALIGN)) or "center"
 end
 
+local function _getLimitMode(pfx, S)
+    return (S and S:readSetting(pfx .. SK_LIMIT_MODE)) or "max_length"
+end
+
 local function _getMaxLen(pfx, S)
     local v = S and tonumber(S:readSetting(pfx .. SK_MAX_LEN))
     return (v and v > 0) and v or 500
+end
+
+local function _getLineCount(pfx, S)
+    local v = S and tonumber(S:readSetting(pfx .. SK_LINE_COUNT))
+    return (v and v >= 1 and v <= 5) and v or 3
 end
 
 local function _getFontSize(pfx, S)
@@ -157,6 +184,89 @@ local function _truncate(s, max_chars)
         i = i + char_len
     end
     return s
+end
+
+-- ---------------------------------------------------------------------------
+-- Truncate text to fit within a specific number of rendered lines
+-- Uses cache to avoid expensive re-calculation
+-- ---------------------------------------------------------------------------
+
+local function _truncateToLines(text, width, face, max_lines, cache_key)
+    if not text or text == "" or max_lines <= 0 then return "" end
+    
+    -- Check cache first (huge performance win for repeated calls)
+    if cache_key and _truncate_cache[cache_key] then
+        return _truncate_cache[cache_key]
+    end
+    
+    local RenderText = require("ui/rendertext")
+    local words = {}
+    for word in text:gmatch("%S+") do
+        words[#words + 1] = word
+    end
+    
+    local lines = {}
+    local current_line = ""
+    local line_count = 0
+    local word_idx = 1
+    
+    while word_idx <= #words do
+        local word = words[word_idx]
+        local test_line = current_line == "" and word or (current_line .. " " .. word)
+        local w = RenderText:sizeUtf8Text(0, width, face, test_line, true).x
+        
+        if w <= width then
+            current_line = test_line
+            word_idx = word_idx + 1
+        else
+            -- Current line is full, save it
+            if current_line ~= "" then
+                lines[#lines + 1] = current_line
+                line_count = line_count + 1
+                
+                -- Check if we've reached max lines
+                if line_count >= max_lines then
+                    -- Add ellipsis only if there are more words
+                    if word_idx <= #words then
+                        return table.concat(lines, " ") .. "\xE2\x80\xA6"
+                    else
+                        return table.concat(lines, " ")
+                    end
+                end
+                current_line = ""
+            else
+                -- Single word too long, add it anyway and move on
+                lines[#lines + 1] = word
+                line_count = line_count + 1
+                if line_count >= max_lines and word_idx < #words then
+                    return table.concat(lines, " ") .. "\xE2\x80\xA6"
+                end
+                word_idx = word_idx + 1
+                current_line = ""
+            end
+        end
+    end
+    
+    -- Add remaining text if any
+    if current_line ~= "" then
+        lines[#lines + 1] = current_line
+    end
+    
+    local result = table.concat(lines, " ")
+    
+    -- Store in cache (with simple LRU: clear all if max size exceeded)
+    if cache_key then
+        if not _truncate_cache[cache_key] then
+            if _cache_count >= _cache_max_size then
+                _truncate_cache = {}  -- Simple eviction: clear all
+                _cache_count = 0
+            end
+            _cache_count = _cache_count + 1
+        end
+        _truncate_cache[cache_key] = result
+    end
+    
+    return result
 end
 
 -- ---------------------------------------------------------------------------
@@ -260,14 +370,14 @@ local function _buildFps(ctx)
 end
 
 -- ---------------------------------------------------------------------------
--- _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale)
+-- _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp)
 --
 -- Builds the tappable description widget.  Returns:
 --   dtap         InputContainer  — the tappable strip
 --   strip_h      number          — the actual rendered height (pixels)
 -- ---------------------------------------------------------------------------
 
-local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale)
+local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp)
     scale     = scale     or 1.0
     lbl_scale = lbl_scale or 1.0
 
@@ -293,12 +403,23 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
     local desc_fs = math.max(7, math.floor(Screen:scaleBySize(base_fs) * scale * lbl_scale))
     local face    = Font:getFace("smallinfofont", desc_fs)
 
-    local align    = _getAlign(pfx, S)
-    local max_len  = _getMaxLen(pfx, S)
-    local desc_w   = w - PAD * 2   -- same horizontal inset as the carousel's inner content
+    local align       = _getAlign(pfx, S)
+    local limit_mode  = _getLimitMode(pfx, S)
+    local desc_w      = w - PAD * 2   -- same horizontal inset as the carousel's inner content
 
-    -- Truncate for strip; keep full text for the viewer
-    local strip_text = _truncate(full_desc, max_len)
+    -- Determine max_lines and strip_text based on limit mode
+    local max_lines, strip_text
+    if limit_mode == "fixed_lines" then
+        max_lines  = _getLineCount(pfx, S)
+        -- Pre-truncate text to exact line count to prevent overflow
+        -- Use cache key: filepath|width|fontsize|maxlines for performance
+        local cache_key = fp and (fp .. "|" .. desc_w .. "|" .. desc_fs .. "|" .. max_lines)
+        strip_text = _truncateToLines(full_desc, desc_w, face, max_lines, cache_key)
+    else  -- "max_length" (default)
+        max_lines  = STRIP_LINES
+        local max_len = _getMaxLen(pfx, S)
+        strip_text = _truncate(full_desc, max_len)
+    end
 
     -- Use makeAlphaTextBox so the text composites over whatever is already on
     -- the framebuffer — identical to the technique used by module_hero_currently.
@@ -310,7 +431,7 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
         width       = desc_w,
         alignment   = align,
         fgcolor     = CLR_TEXT,
-        max_lines   = STRIP_LINES,
+        max_lines   = max_lines,
         line_height = 0.3,
     }
     local desc_widget
@@ -323,8 +444,17 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
         desc_widget = TextBoxWidget:new(desc_opts)
     end
 
-    -- Actual rendered height
-    local actual_h = desc_widget:getSize().h
+    -- Calculate height: fixed for fixed_lines mode, actual for max_length mode
+    local actual_h
+    if limit_mode == "fixed_lines" then
+        -- Use fixed height based on line count to keep layout stable
+        -- Text is already pre-truncated by _truncateToLines
+        local line_h = math.ceil((face.size or desc_fs) * 1.4)
+        actual_h = line_h * max_lines
+    else
+        -- Use actual rendered height for max_length mode
+        actual_h = desc_widget:getSize().h
+    end
 
     -- Tappable wrapper: opens full description in a scrollable viewer
     local DescTap = InputContainer:extend{}
@@ -373,8 +503,7 @@ function P.apply()
 
     -- ── wrap getHeight() ──────────────────────────────────────────────────
     -- Must be wrapped before build() so the homescreen reserves the correct
-    -- total height.  Uses a fixed estimate (STRIP_LINES lines) regardless of
-    -- the actual book description so height is stable across carousel swipes.
+    -- total height.  Uses a fixed estimate based on limit mode settings.
 
     local orig_getHeight = M.getHeight
     M.getHeight = function(ctx)
@@ -396,7 +525,16 @@ function P.apply()
         local face   = Font:getFace("smallinfofont", math.max(7, math.floor(Screen:scaleBySize(base_fs2) * scale2 * lbl_scale2)))
         local line_h = math.ceil(face.size * 1.4)
 
-        return h + PAD2 + line_h * STRIP_LINES
+        -- Determine line count based on limit mode
+        local limit_mode = _getLimitMode(pfx, S)
+        local line_count
+        if limit_mode == "fixed_lines" then
+            line_count = _getLineCount(pfx, S)
+        else  -- "max_length"
+            line_count = STRIP_LINES
+        end
+
+        return h + PAD2 + line_h * line_count
     end
 
     -- ── wrap build() ──────────────────────────────────────────────────────
@@ -423,7 +561,13 @@ function P.apply()
         local fp     = fps[curIdx]
 
         local full_desc = fp and _getDescription(fp)
-        if not full_desc then return carousel end
+        local limit_mode = _getLimitMode(pfx, S)
+        
+        -- In fixed_lines mode, always add placeholder even without description to keep layout stable
+        -- In max_length mode, skip if no description (old behavior)
+        if not full_desc and limit_mode ~= "fixed_lines" then
+            return carousel
+        end
 
         -- Fetch book title/author for the fullscreen viewer header
         local bd_title, bd_author
@@ -443,8 +587,27 @@ function P.apply()
         local scale     = (ok_cfg and Config and ((c_bundle and c_bundle.scale)     or Config.getModuleScale("coverdeck",     pfx))) or 1.0
         local lbl_scale = (ok_cfg and Config and ((c_bundle and c_bundle.lbl_scale) or Config.getItemLabelScale("coverdeck", pfx))) or 1.0
 
-        -- Build the tappable description strip
-        local dtap, _strip_h = _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale)
+        -- Build the description strip (or empty placeholder in fixed_lines mode)
+        local dtap, _strip_h
+        if full_desc then
+            dtap, _strip_h = _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp)
+        else
+            -- Create empty placeholder with fixed height in fixed_lines mode
+            local Device = require("device")
+            local Screen = Device.screen
+            local Font   = require("ui/font")
+            local Geom   = require("ui/geometry")
+            local VerticalSpan = require("ui/widget/verticalspan")
+            
+            local base_fs = _getFontSize(pfx, S)
+            local desc_fs = math.max(7, math.floor(Screen:scaleBySize(base_fs) * scale * lbl_scale))
+            local face    = Font:getFace("smallinfofont", desc_fs)
+            local line_h  = math.ceil((face.size or desc_fs) * 1.4)
+            local line_count = _getLineCount(pfx, S)
+            _strip_h = line_h * line_count
+            
+            dtap = VerticalSpan:new{ width = _strip_h }
+        end
 
         -- Inject description into carousel's internal structure.
         -- Carousel is a FrameContainer containing a VerticalGroup.
@@ -581,6 +744,7 @@ function P.apply()
                                 checked_func = function() return _getFontSize(pfx, S) == sz end,
                                 callback     = function()
                                     if S then S:saveSetting(pfx .. SK_FONT_SIZE, sz) end
+                                    _clearCache()  -- Font size affects rendering
                                     refresh()
                                 end,
                             }
@@ -589,12 +753,40 @@ function P.apply()
                     end)(),
                 },
 
-                -- Max Length (number input)
+                -- Limit Mode (max_length or fixed_lines)
+                {
+                    text = _lc("Limit Mode"),
+                    sub_item_table = {
+                        {
+                            text         = _lc("Max Length"),
+                            radio        = true,
+                            checked_func = function() return _getLimitMode(pfx, S) == "max_length" end,
+                            callback     = function()
+                                if S then S:saveSetting(pfx .. SK_LIMIT_MODE, "max_length") end
+                                _clearCache()  -- Mode change invalidates cache
+                                refresh()
+                            end,
+                        },
+                        {
+                            text         = _lc("Fixed Line Count"),
+                            radio        = true,
+                            checked_func = function() return _getLimitMode(pfx, S) == "fixed_lines" end,
+                            callback     = function()
+                                if S then S:saveSetting(pfx .. SK_LIMIT_MODE, "fixed_lines") end
+                                _clearCache()  -- Mode change invalidates cache
+                                refresh()
+                            end,
+                        },
+                    },
+                },
+
+                -- Max Length (number input, only shown when limit_mode = "max_length")
                 {
                     text_func = function()
                         local v = S and tonumber(S:readSetting(pfx .. SK_MAX_LEN)) or 500
                         return string.format("%s: %d", _lc("Max Length"), v)
                     end,
+                    enabled_func = function() return _getLimitMode(pfx, S) == "max_length" end,
                     keep_menu_open = true,
                     callback = function()
                         local InputDialog = require("ui/widget/inputdialog")
@@ -621,6 +813,7 @@ function P.apply()
                                             if S then
                                                 S:saveSetting(pfx .. SK_MAX_LEN, val)
                                             end
+                                            _clearCache()  -- Max length affects truncation
                                         end
                                         UIManager:close(dlg)
                                         refresh()
@@ -631,6 +824,29 @@ function P.apply()
                         UIManager:show(dlg)
                         dlg:onShowKeyboard()
                     end,
+                },
+
+                -- Line Count (radio buttons 1-5, only shown when limit_mode = "fixed_lines")
+                {
+                    text = _lc("Line Count"),
+                    enabled_func = function() return _getLimitMode(pfx, S) == "fixed_lines" end,
+                    sub_item_table = (function()
+                        local counts = { 1, 2, 3, 4, 5 }
+                        local t = {}
+                        for _, cnt in ipairs(counts) do
+                            t[#t + 1] = {
+                                text         = tostring(cnt),
+                                radio        = true,
+                                checked_func = function() return _getLineCount(pfx, S) == cnt end,
+                                callback     = function()
+                                    if S then S:saveSetting(pfx .. SK_LINE_COUNT, cnt) end
+                                    _clearCache()  -- Line count affects rendering
+                                    refresh()
+                                end,
+                            }
+                        end
+                        return t
+                    end)(),
                 },
             },
         }
