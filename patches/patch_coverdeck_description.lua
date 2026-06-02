@@ -223,37 +223,36 @@ local function _truncateToLines(text, width, face, max_lines, cache_key)
             current_line = test_line
             word_idx = word_idx + 1
         else
-            -- Current line is full, save it
+            -- Current line is full, check if we can add it
             if current_line ~= "" then
-                lines[#lines + 1] = current_line
-                line_count = line_count + 1
-                
-                -- Check if we've reached max lines
+                -- Check BEFORE adding the line
                 if line_count >= max_lines then
-                    -- Add ellipsis only if there are more words
-                    if word_idx <= #words then
-                        return table.concat(lines, " ") .. "\xE2\x80\xA6"
-                    else
-                        return table.concat(lines, " ")
-                    end
-                end
-                current_line = ""
-            else
-                -- Single word too long, add it anyway and move on
-                lines[#lines + 1] = word
-                line_count = line_count + 1
-                if line_count >= max_lines and word_idx < #words then
+                    -- Already at max, stop here with ellipsis
                     return table.concat(lines, " ") .. "\xE2\x80\xA6"
                 end
+                
+                lines[#lines + 1] = current_line
+                line_count = line_count + 1
+                current_line = ""
+            else
+                -- Single word too long, check before adding
+                if line_count >= max_lines then
+                    return table.concat(lines, " ") .. "\xE2\x80\xA6"
+                end
+                
+                lines[#lines + 1] = word
+                line_count = line_count + 1
                 word_idx = word_idx + 1
                 current_line = ""
             end
         end
     end
     
-    -- Add remaining text if any
+    -- Add remaining text if any (only if we haven't reached max lines)
     if current_line ~= "" then
-        lines[#lines + 1] = current_line
+        if line_count < max_lines then
+            lines[#lines + 1] = current_line
+        end
     end
     
     local result = table.concat(lines, " ")
