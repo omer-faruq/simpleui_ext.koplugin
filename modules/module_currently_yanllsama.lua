@@ -533,7 +533,7 @@ function M.reset()
     _SH = nil; _SUIStyle = nil; _cache = nil
 end
 
-local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows)
+local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows, current_fp)
     local cover_gap      = math.max(0, math.floor(_BASE_COVER_GAP      * scale * (getCoverGapPct(pfx) / 100)))
     local bar_gap_before = math.max(1, math.floor(_BASE_BAR_GAP_BEFORE * scale))
     local bar_h          = math.max(1, math.floor(_BASE_BAR_H          * scale))
@@ -753,12 +753,12 @@ local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_sca
     local row = HorizontalGroup:new{ align = "top", [1] = left_wrapper, [2] = right_wrapper }
     
     local tappable = InputContainer:new{
-        dimen = Geom:new{ w = w, h = content_h }, _fp = ctx.current_fp, _open_fn = ctx.open_fn,
+        dimen = Geom:new{ w = w, h = content_h }, _fp = current_fp, _open_fn = ctx.open_fn,
         [1] = FrameContainer:new{ bordersize = 0, padding = 0, padding_left = PAD, padding_right = PAD, [1] = row },
     }
     tappable.ges_events = { TapBook = { GestureRange:new{ ges = "tap", range = function() return tappable.dimen end } } }
     
-    tappable._cover_slots = { { container = left_frame, idx = 1, fp = ctx.current_fp, w = D.COVER_W, h = D.COVER_H, align = nil, stretch = 0.10 } }
+    tappable._cover_slots = { { container = left_frame, idx = 1, fp = current_fp, w = D.COVER_W, h = D.COVER_H, align = nil, stretch = 0.10 } }
     
     function tappable:onTapBook()
         if self._open_fn then self._open_fn(self._fp) end
@@ -1166,7 +1166,7 @@ function M.build(w, ctx)
         cachePut(current_fp, pfx, stats)
     end
 
-    return _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows)
+    return _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows, current_fp)
 end
 
 return M
