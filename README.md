@@ -347,6 +347,23 @@ Adds a "Number of Copies" setting to all SimpleUI modules, allowing you to place
 </details>
 
 <details>
+<summary><b>Clock: Chinese Date Format</b> — Replace clock date with Chinese format (6月3日 周三)</summary>
+
+### Clock: Chinese Date Format
+
+Replaces the SimpleUI Clock module's date format from "Wednesday, 3 June" to Chinese format "6月3日 周三".
+
+**Features:**
+- Uses hotfix utility to replace the internal `_localDate()` function
+- Chinese weekday names (日, 一, 二, 三, 四, 五, 六)
+- Format: "M月D日 周X" (e.g., "6月3日 周三")
+- No modification to SimpleUI's original module files
+
+**Note:** This patch is disabled by default (opt-in). Enable it via **Tools → SimpleUI Extra → Patches**. Contributed by [@yefq](https://github.com/yefq) in [PR #4](https://github.com/omer-faruq/simpleui_ext.koplugin/pull/4).
+
+</details>
+
+<details>
 <summary><b>SimpleUI Home Screen on Sleep Screen</b> — Display your homescreen as the screensaver</summary>
 
 ### SimpleUI Home Screen on Sleep Screen
@@ -410,6 +427,8 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
    └── simpleui_ext.koplugin/
        ├── _meta.lua
        ├── main.lua
+       ├── utils/
+       │   └── hotfix.lua
        ├── modules/
        │   ├── module_hero_currently.lua
        │   ├── module_recent_book_stats.lua
@@ -421,6 +440,7 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
            ├── patch_coverdeck_exclude.lua
            ├── patch_coverdeck_description.lua
            ├── patch_module_copies.lua
+           ├── patch_clock_date_cn.lua
            └── patch_screensaver_homescreen.lua
    ```
 
@@ -492,6 +512,7 @@ This improves startup performance by preventing the module from loading at all.
 - **Cover Deck — Exclude Paths from Recent** — Filter books from Cover Deck's Recent Books source
 - **Cover Deck — Description Strip** — Show book descriptions below/above the carousel
 - **Module Copies** — Place the same module on multiple homescreen pages
+- **Clock: Chinese Date Format** — Replace clock date with Chinese format (6月3日 周三)
 - **SimpleUI Home Screen on Sleep Screen** — Display your homescreen as the screensaver
 
 **Disabling a patch:**
@@ -577,6 +598,29 @@ return P
 - Use `PATCH_ID` constant for consistency
 - `apply()` called once after all plugins initialize
 
+**Advanced: Using the Hotfix Utility**
+
+For patches that need to replace nested functions (upvalues) in existing modules, use the `hotfix` utility:
+
+```lua
+local hotfix = require "utils/hotfix"
+
+-- Replace a nested function by path
+local ok, err = hotfix(newFunction, module.publicFunction, "publicFunction -> nestedFunction")
+if not ok then
+    logger.warn("Failed to apply hotfix: " .. err)
+end
+```
+
+**How it works:**
+- Uses `debug.getupvalue` and `debug.setupvalue` to walk the upvalue chain
+- Path format: `"parent -> child -> target"` (e.g., `"build -> _localDate"`)
+- Returns `true` on success, or `false` plus error message on failure
+
+**Example:** See `patch_clock_date_cn.lua` for a complete example of replacing SimpleUI Clock's date formatter.
+
+**Note:** The hotfix utility was contributed by [@yefq](https://github.com/yefq) in [PR #4](https://github.com/omer-faruq/simpleui_ext.koplugin/pull/4).
+
 ---
 
 ## Credits
@@ -586,5 +630,6 @@ return P
 - **[quanganhdo/koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches)** — `module_recent_book_stats.lua` is a modified version of `2-reading-stats-popup.lua` from this repository, adapted as a SimpleUI homescreen module.
 - **[zenixlabs/koreader-frankenpatches-public](https://github.com/zenixlabs/koreader-frankenpatches-public)** — `module_reading_streaks.lua` and `module_reading_insights.lua` are derived from `2-reading-insights-popup.lua` from this repository, adapted as SimpleUI homescreen modules.
 - **[yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading)** — `module_currently_yanllsama.lua` is based on Yanllsama's enhanced Currently Reading module with dynamic grid system, customizable headers, and rich statistics.
+- **[@yefq](https://github.com/yefq)** — Contributed the hotfix utility (`utils/hotfix.lua`) and Chinese date format patch (`patch_clock_date_cn.lua`) in [PR #4](https://github.com/omer-faruq/simpleui_ext.koplugin/pull/4).
 - **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI.
 
