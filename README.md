@@ -606,8 +606,8 @@ For patches that need to replace nested functions (upvalues) in existing modules
 local hotfix = require "utils/hotfix"
 
 -- Replace a nested function by path
-local ok, err = hotfix(newFunction, module.publicFunction, "publicFunction -> nestedFunction")
-if not ok then
+local err = hotfix(newFunction, module.publicFunction, "publicFunction -> nestedFunction")
+if err then
     logger.warn("Failed to apply hotfix: " .. err)
 end
 ```
@@ -615,7 +615,7 @@ end
 **How it works:**
 - Uses `debug.getupvalue` and `debug.setupvalue` to walk the upvalue chain
 - Path format: `"parent -> child -> target"` (e.g., `"build -> _localDate"`)
-- Returns `true` on success, or `false` plus error message on failure
+- Returns `nil` on success, or an error message string on failure
 
 **Example:** See `patch_clock_date_cn.lua` for a complete example of replacing SimpleUI Clock's date formatter.
 

@@ -43,8 +43,8 @@ function P.apply()
         return
     end
 
-    local ok, err = hotfix(_localDateCN, ClockMod.build, "build -> _localDate")
-    if not ok then
+    local err = hotfix(_localDateCN, ClockMod.build, "build -> _localDate")
+    if err then
         logger.warn("simpleui_ext/patch_clock_date_cn: failed to apply hotfix: " .. err)
         return
     end
