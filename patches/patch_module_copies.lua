@@ -51,6 +51,25 @@ function patch.apply()
             wrapped_mod._original_name = mod.name
             wrapped_mod._copy_index  = copy_index
             wrapped_mod.name         = mod.name .. " (Copy " .. copy_index .. ")"
+
+            -- LayoutService.save() iterates Registry.list() and calls
+            -- setEnabled(pfx, false) for every module not in the layout.
+            -- For copies, this would accidentally disable the base module's
+            -- settings. Clear setEnabled and enabled_key so LayoutService
+            -- skips the copy entirely. Preserve isEnabled so the copy still
+            -- mirrors the base module's enabled state.
+            if type(wrapped_mod.isEnabled) ~= "function" and wrapped_mod.enabled_key then
+                local ek         = mod.enabled_key
+                local default_on = mod.default_on
+                wrapped_mod.isEnabled = function(pfx)
+                    local v = SUISettings:readSetting(pfx .. ek)
+                    if v == nil then return default_on ~= false end
+                    return v == true
+                end
+            end
+            wrapped_mod.setEnabled  = nil
+            wrapped_mod.enabled_key = nil
+
             wrapped_cache[id]        = wrapped_mod
             return wrapped_mod
         end
@@ -233,6 +252,51 @@ function patch.apply()
                 end
 
                 mod.getMenuItems = enhanceModuleMenuItems
+
+                -- Wrap the base module's setEnabled so that deactivating it
+                -- when copies are still in the layout keeps settings enabled.
+                -- Without this, LayoutService.save() calls setEnabled(pfx,false)
+                -- for the base module when it is not on a page, which clears
+                -- SETTING_ON and prevents any active copies from rendering.
+                local _base_id = mod.id
+                if type(mod.setEnabled) == "function" then
+                    local _orig_se = mod.setEnabled
+                    mod.setEnabled = function(pfx, on)
+                        if not on then
+                            local layout = SUISettings:readSetting("simpleui_layout")
+                            if layout and type(layout.pages) == "table" then
+                                for _, pg in ipairs(layout.pages) do
+                                    for _, pid in ipairs(pg.modules or {}) do
+                                        if _isCopyOf(pid, _base_id) then
+                                            _orig_se(pfx, true)
+                                            return
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        _orig_se(pfx, on)
+                    end
+                elseif mod.enabled_key then
+                    local _ek = mod.enabled_key
+                    mod.setEnabled = function(pfx, on)
+                        if not on then
+                            local layout = SUISettings:readSetting("simpleui_layout")
+                            if layout and type(layout.pages) == "table" then
+                                for _, pg in ipairs(layout.pages) do
+                                    for _, pid in ipairs(pg.modules or {}) do
+                                        if _isCopyOf(pid, _base_id) then
+                                            SUISettings:saveSetting(pfx .. _ek, true)
+                                            return
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        SUISettings:saveSetting(pfx .. _ek, on)
+                    end
+                end
+
                 mod._module_copies_enhanced = true
             end
         end
