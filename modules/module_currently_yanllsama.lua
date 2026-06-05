@@ -1155,15 +1155,23 @@ function M.build(w, ctx)
 
     local stats = cacheGet(current_fp, pfx)
     if not stats then
+        local md5 = prefetched_entry and prefetched_entry.partial_md5_checksum
+        if not md5 then
+            pcall(function()
+                local DocSettings = require("docsettings")
+                local ds = DocSettings:open(current_fp)
+                if ds then md5 = ds:readSetting("partial_md5_checksum") end
+            end)
+        end
         local book_meta = {
             fp = current_fp,
             title = bd.title or "",
-            md5 = prefetched_entry and prefetched_entry.partial_md5_checksum,
+            md5 = md5,
             percent = bd.percent or 0,
             pages = bd.pages or 0
         }
         stats = gatherStats(book_meta, pfx, ctx.db_conn)
-        cachePut(current_fp, pfx, stats)
+        if md5 then cachePut(current_fp, pfx, stats) end
     end
 
     return _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows, current_fp)

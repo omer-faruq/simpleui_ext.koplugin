@@ -335,20 +335,38 @@ function P.apply()
         local live_Config     = package.loaded["sui_config"]                     or Config
 
         -- Determine which modules are on the requested page.
-        local raw_order = live_Registry.loadOrder(PFX)
+        -- Mirrors sui_homescreen._updatePage: prefer the new simpleui_layout
+        -- structure (layout.pages[i].modules); fall back to the legacy
+        -- PAGE_BREAK_ID approach when simpleui_layout is absent.
         local pages_of_ids = {}
-        local cur_page = {}
-        for _, id in ipairs(raw_order) do
-            if id == PAGE_BREAK_ID then
-                pages_of_ids[#pages_of_ids + 1] = cur_page
-                cur_page = {}
-            else
-                cur_page[#cur_page + 1] = id
+        local layout = live_SUISettings:readSetting("simpleui_layout")
+        if layout and type(layout.pages) == "table" then
+            for _, page in ipairs(layout.pages) do
+                local page_ids = {}
+                if type(page.modules) == "table" then
+                    for _, mod_id in ipairs(page.modules) do
+                        page_ids[#page_ids + 1] = mod_id
+                    end
+                end
+                pages_of_ids[#pages_of_ids + 1] = page_ids
             end
+        else
+            local raw_order = live_Registry.loadOrder(PFX)
+            local cur_page = {}
+            for _, id in ipairs(raw_order) do
+                if id == PAGE_BREAK_ID then
+                    pages_of_ids[#pages_of_ids + 1] = cur_page
+                    cur_page = {}
+                else
+                    cur_page[#cur_page + 1] = id
+                end
+            end
+            pages_of_ids[#pages_of_ids + 1] = cur_page  -- last (or only) page
         end
-        pages_of_ids[#pages_of_ids + 1] = cur_page  -- last (or only) page
 
-        local chosen_pages = live_SUISettings:readSetting(PFX .. "homescreen_num_pages")
+        local chosen_pages = layout and type(layout.pages) == "table"
+            and #layout.pages
+            or live_SUISettings:readSetting(PFX .. "homescreen_num_pages")
         if chosen_pages and chosen_pages > #pages_of_ids then
             for _ = #pages_of_ids + 1, chosen_pages do
                 pages_of_ids[#pages_of_ids + 1] = {}

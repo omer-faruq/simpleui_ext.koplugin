@@ -24,57 +24,69 @@ function patch.apply()
     logger.info("simpleui_ext: patch_module_copies: applying module copies patch")
 
     local original_get = Registry.get
-    local original_defaultOrder = Registry.defaultOrder
-    
     local wrapped_cache = {}
 
     Registry.get = function(id)
         if wrapped_cache[id] then
             return wrapped_cache[id]
         end
-        
+
         local copy_index = id:match("#(%d+)$")
         if not copy_index then
             return original_get(id)
         end
-        
+
         local base_id = id:match("^(.+)#%d+$")
         local mod = original_get(base_id)
-        
+
         if mod then
             local wrapped_mod = {}
             for k, v in pairs(mod) do
                 wrapped_mod[k] = v
             end
+            -- Use the copy ID (e.g. "clock#2") so buildModulePicker's
+            -- active_set lookup matches the raw ID stored in layout pages.
+            wrapped_mod.id           = id
+            wrapped_mod._original_id = mod.id
             wrapped_mod._original_name = mod.name
-            wrapped_mod._copy_index = copy_index
-            wrapped_mod.name = mod.name .. " (Copy " .. copy_index .. ")"
-            wrapped_cache[id] = wrapped_mod
+            wrapped_mod._copy_index  = copy_index
+            wrapped_mod.name         = mod.name .. " (Copy " .. copy_index .. ")"
+            wrapped_cache[id]        = wrapped_mod
             return wrapped_mod
         end
-        
+
         return mod
     end
 
     local UIManager = require("ui/uimanager")
     local SpinWidget = require("ui/widget/spinwidget")
-    local Blitbuffer = require("ffi/blitbuffer")
+
+    -- Returns true when order_id is a copy of base_id (e.g. "clock#2").
+    -- Uses plain string comparison to avoid Lua pattern-character issues.
+    local function _isCopyOf(order_id, base_id)
+        local prefix = base_id .. "#"
+        return #order_id > #prefix and order_id:sub(1, #prefix) == prefix
+    end
+    local function _copyNum(order_id, base_id)
+        local prefix = base_id .. "#"
+        return tonumber(order_id:sub(#prefix + 1))
+    end
 
     local original_list = Registry.list
     Registry.list = function()
         local mods = original_list()
-        
+
         local _ = require("gettext")
-        
-        for i, mod in ipairs(mods) do
+
+        for _mi, mod in ipairs(mods or {}) do
             if not mod._module_copies_enhanced then
                 local original_getMenuItems = mod.getMenuItems
-                
+
                 local function enhanceModuleMenuItems(ctx_menu)
                     local original_items = original_getMenuItems and original_getMenuItems(ctx_menu) or {}
-                    
+
                     local enhanced_items = {}
-                    for idx, item in ipairs(original_items) do
+                    for _, item in ipairs(original_items) do
                         enhanced_items[#enhanced_items + 1] = item
                     end
 
@@ -84,97 +96,131 @@ function patch.apply()
                         callback = function()
                             local pfx = ctx_menu and ctx_menu.pfx or "simpleui_"
                             local current_copies = SUISettings:readSetting(pfx .. "module_" .. mod.id .. "_copies") or 1
-                            
+
                             UIManager:show(SpinWidget:new{
-                                title_text = _("Number of Copies"),
-                                info_text = _("Set how many copies of this module to show.\nEach copy can be placed on different pages."),
-                                value = current_copies,
-                                value_min = 1,
-                                value_max = 10,
-                                value_step = 1,
-                                ok_text = _("OK"),
-                                cancel_text = _("Cancel"),
+                                title_text   = _("Number of Copies"),
+                                info_text    = _("Set how many copies of this module to show.\nEach copy can be placed on different pages."),
+                                value        = current_copies,
+                                value_min    = 1,
+                                value_max    = 10,
+                                value_step   = 1,
+                                ok_text      = _("OK"),
+                                cancel_text  = _("Cancel"),
                                 default_value = 1,
                                 callback = function(spin)
                                     local new_copies = spin.value
                                     SUISettings:saveSetting(pfx .. "module_" .. mod.id .. "_copies", new_copies)
-                                    
-                                    local saved_order = SUISettings:readSetting(pfx .. "module_order") or {}
-                                    local new_order = {}
-                                    local PAGE_BREAK = require("sui_homescreen").PAGE_BREAK_ID
-                                    
-                                    local existing_copies = {}
-                                    local found_original = false
-                                    local original_position = nil
-                                    
-                                    for order_idx, order_id in ipairs(saved_order) do
-                                        local base_id = order_id:match("^(.+)#%d+$") or order_id
-                                        if base_id == mod.id then
-                                            if order_id == mod.id then
-                                                found_original = true
-                                                original_position = order_idx
-                                            else
-                                                local copy_num = tonumber(order_id:match("#(%d+)$"))
-                                                if copy_num then
-                                                    existing_copies[copy_num] = order_idx
+
+                                    -- Build a "needed" set for copies 2..new_copies.
+                                    local needed = {}
+                                    for i = 2, new_copies do needed[i] = true end
+
+                                    local layout = SUISettings:readSetting("simpleui_layout")
+                                    if layout and type(layout.pages) == "table" then
+                                        -- ── New simpleui_layout path ────────────────────────
+                                        local new_pages    = {}
+                                        local found_original = false
+
+                                        for _, page in ipairs(layout.pages) do
+                                            local new_modules = {}
+                                            for _, order_id in ipairs(page.modules or {}) do
+                                                if order_id == mod.id then
+                                                    found_original = true
+                                                    new_modules[#new_modules + 1] = order_id
+                                                elseif _isCopyOf(order_id, mod.id) then
+                                                    local cn = _copyNum(order_id, mod.id)
+                                                    if cn and cn <= new_copies then
+                                                        new_modules[#new_modules + 1] = order_id
+                                                        needed[cn] = nil
+                                                    end
+                                                    -- else: remove — exceeds new_copies
+                                                else
+                                                    new_modules[#new_modules + 1] = order_id
+                                                end
+                                            end
+                                            -- Shallow-copy the page table, replacing modules.
+                                            local new_page = {}
+                                            for k, v in pairs(page) do new_page[k] = v end
+                                            new_page.modules = new_modules
+                                            new_pages[#new_pages + 1] = new_page
+                                        end
+
+                                        -- Append any still-needed copies to the last page.
+                                        if #new_pages > 0 then
+                                            local lp = new_pages[#new_pages]
+                                            for i = 2, new_copies do
+                                                if needed[i] then
+                                                    lp.modules[#lp.modules + 1] = mod.id .. "#" .. i
                                                 end
                                             end
                                         end
-                                    end
-                                    
-                                    local needed_copies = {}
-                                    for i = 2, new_copies do
-                                        needed_copies[i] = true
-                                    end
-                                    
-                                    for order_idx, order_id in ipairs(saved_order) do
-                                        if order_id == PAGE_BREAK then
-                                            new_order[#new_order + 1] = order_id
-                                        else
-                                            local base_id = order_id:match("^(.+)#%d+$") or order_id
-                                            
-                                            if base_id == mod.id then
-                                                if order_id == mod.id then
-                                                    new_order[#new_order + 1] = mod.id
-                                                else
-                                                    local copy_num = tonumber(order_id:match("#(%d+)$"))
-                                                    if copy_num and copy_num <= new_copies then
-                                                        new_order[#new_order + 1] = order_id
-                                                        needed_copies[copy_num] = nil
-                                                    end
+
+                                        -- If the original module was absent, add it + copies.
+                                        if not found_original and #new_pages > 0 then
+                                            local lp = new_pages[#new_pages]
+                                            lp.modules[#lp.modules + 1] = mod.id
+                                            for i = 2, new_copies do
+                                                lp.modules[#lp.modules + 1] = mod.id .. "#" .. i
+                                            end
+                                        end
+
+                                        local new_layout = {}
+                                        for k, v in pairs(layout) do new_layout[k] = v end
+                                        new_layout.pages = new_pages
+                                        SUISettings:saveSetting("simpleui_layout", new_layout)
+                                    else
+                                        -- ── Legacy module_order path ────────────────────────
+                                        local PAGE_BREAK  = require("sui_homescreen").PAGE_BREAK_ID
+                                        local saved_order = SUISettings:readSetting(pfx .. "module_order") or {}
+                                        local new_order   = {}
+                                        local found_original = false
+
+                                        for _, order_id in ipairs(saved_order) do
+                                            if order_id == PAGE_BREAK then
+                                                new_order[#new_order + 1] = order_id
+                                            elseif order_id == mod.id then
+                                                found_original = true
+                                                new_order[#new_order + 1] = order_id
+                                            elseif _isCopyOf(order_id, mod.id) then
+                                                local cn = _copyNum(order_id, mod.id)
+                                                if cn and cn <= new_copies then
+                                                    new_order[#new_order + 1] = order_id
+                                                    needed[cn] = nil
                                                 end
                                             else
                                                 new_order[#new_order + 1] = order_id
                                             end
                                         end
-                                    end
-                                    
-                                    for i = 2, new_copies do
-                                        if needed_copies[i] then
-                                            new_order[#new_order + 1] = mod.id .. "#" .. i
-                                        end
-                                    end
-                                    
-                                    if not found_original then
-                                        new_order[#new_order + 1] = mod.id
+
                                         for i = 2, new_copies do
-                                            new_order[#new_order + 1] = mod.id .. "#" .. i
+                                            if needed[i] then
+                                                new_order[#new_order + 1] = mod.id .. "#" .. i
+                                            end
                                         end
+
+                                        if not found_original then
+                                            new_order[#new_order + 1] = mod.id
+                                            for i = 2, new_copies do
+                                                new_order[#new_order + 1] = mod.id .. "#" .. i
+                                            end
+                                        end
+
+                                        SUISettings:saveSetting(pfx .. "module_order", new_order)
                                     end
-                                    
-                                    SUISettings:saveSetting(pfx .. "module_order", new_order)
-                                    
+
+                                    -- Invalidate the copy wrapper cache for this module.
+                                    local copy_prefix = mod.id .. "#"
                                     for k in pairs(wrapped_cache) do
-                                        if k:match("^" .. mod.id .. "#") then
+                                        if k:sub(1, #copy_prefix) == copy_prefix then
                                             wrapped_cache[k] = nil
                                         end
                                     end
-                                    
+
                                     local ok_hs, HS_module = pcall(require, "sui_homescreen")
                                     if ok_hs and HS_module and HS_module._instance then
                                         HS_module._instance._enabled_mods_cache = nil
                                     end
-                                    
+
                                     if ctx_menu and ctx_menu.refresh then
                                         ctx_menu.refresh()
                                     end
@@ -185,13 +231,34 @@ function patch.apply()
 
                     return enhanced_items
                 end
-                
+
                 mod.getMenuItems = enhanceModuleMenuItems
                 mod._module_copies_enhanced = true
             end
         end
-        
-        return mods
+
+        -- Append copy modules so buildModulePicker can offer them.
+        -- For each base module that has N copies configured, add entries for
+        -- copies 2..N.  The picker's active_set is keyed on raw layout IDs
+        -- (e.g. "clock#2"), so giving copies their own id lets the filter work.
+        local result = {}
+        for _, m in ipairs(mods or {}) do
+            result[#result + 1] = m
+        end
+        local hs_pfx = "simpleui_hs_"
+        for _, m in ipairs(mods or {}) do
+            if not m.id:find("#", 1, true) then
+                local copies = SUISettings:readSetting(
+                    hs_pfx .. "module_" .. m.id .. "_copies") or 1
+                for ci = 2, copies do
+                    local copy_mod = Registry.get(m.id .. "#" .. ci)
+                    if copy_mod then
+                        result[#result + 1] = copy_mod
+                    end
+                end
+            end
+        end
+        return result
     end
 
     logger.info("simpleui_ext: patch_module_copies: patch applied successfully")
