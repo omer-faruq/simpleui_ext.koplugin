@@ -605,7 +605,7 @@ function P.apply()
             -- Rendered now while module closures are valid; widget tree freed after.
             local snap_widget
             if hs_widget then
-                local ok_bb, bb = pcall(Blitbuffer.new, screen_w, screen_h)
+                local ok_bb, bb = pcall(Blitbuffer.new, screen_w, screen_h, Screen.bb:getType())
                 if ok_bb and bb then
                     -- Pre-fill white so areas not covered by modules show white.
                     pcall(function() bb:paintRect(0, 0, screen_w, screen_h, Blitbuffer.COLOR_WHITE) end)
