@@ -2,5 +2,5 @@ return {
     name        = "simpleui_ext",
     fullname    = "SimpleUI Extra Modules",
     description = [[Extra modules for SimpleUI with enable/disable toggles.]],
-    version     = "1.10.4",
+    version     = "1.11.0",
 }
