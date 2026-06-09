@@ -114,6 +114,7 @@ function P.apply()
         table.insert(sub, insert_before + 1, {
             text_func = function()
                 local page = G_reader_settings:readSetting(SK_PAGE) or 1
+                if page == 0 then return _("Home screen page: Random") end
                 return T(_("Home screen page: %1"), page)
             end,
             enabled_func = function()
@@ -125,9 +126,9 @@ function P.apply()
                 local UIManager2 = require("ui/uimanager")
                 UIManager2:show(SpinWidget:new{
                     title_text      = _("Home screen page"),
-                    info_text       = _("Select which SimpleUI home screen page to display on the sleep screen."),
+                    info_text       = _("Select which SimpleUI home screen page to display on the sleep screen.\n0 = a different random page each time."),
                     value           = G_reader_settings:readSetting(SK_PAGE) or 1,
-                    value_min       = 1,
+                    value_min       = 0,
                     value_max       = 10,
                     value_step      = 1,
                     value_hold_step = 1,
@@ -373,7 +374,13 @@ function P.apply()
             end
         end
 
-        local page_idx = math.max(1, math.min(target_page or 1, #pages_of_ids))
+        local page_idx
+        if not target_page or target_page <= 0 then
+            math.randomseed(os.time())
+            page_idx = math.random(1, math.max(1, #pages_of_ids))
+        else
+            page_idx = math.max(1, math.min(target_page, #pages_of_ids))
+        end
         local page_ids = pages_of_ids[page_idx] or {}
 
         local mods = {}

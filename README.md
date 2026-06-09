@@ -373,7 +373,7 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
 **Features:**
 - Renders the full SimpleUI home screen (all modules) on the sleep screen
 - No status bar or navigation bar — clean module-only view
-- Multi-page support: choose which home screen page to display
+- Multi-page support: choose which home screen page to display, or let it pick a random page each sleep cycle
 - Portrait orientation enforced (matching cover/image modes)
 - E-ink flash to clear ghosting before display
 - Fallback to white screen if rendering fails
@@ -383,15 +383,55 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
 | Setting | Description |
 |---|---|
 | Show SimpleUI home screen on sleep screen | Radio option in the sleep screen type selector |
-| Home screen page | Choose which page to display (1, 2, 3...) — only active when the option above is selected |
+| Home screen page | `0` = random page each sleep cycle; `1`, `2`, `3`… = fixed page — only active when the option above is selected |
 
 **Usage:**
 1. Go to **Settings → Screen → Sleep screen → Wallpaper**
 2. Select **"Show SimpleUI home screen on sleep screen"**
-3. If you have multiple pages, tap **"Home screen page"** to choose which one
+3. Tap **"Home screen page"** to choose a fixed page, or leave at `0` for a different random page each time
 4. Put your device to sleep — your SimpleUI home screen will appear
 
 **Note:** This patch is disabled by default (opt-in). Enable it via **Tools → SimpleUI Extra → Patches**.
+
+</details>
+
+<details>
+<summary><b>Reading Insights on Sleep Screen</b> — Display Reading Insights statistics as the screensaver</summary>
+
+### Reading Insights on Sleep Screen
+
+Renders one of the three Reading Insights pages as a static snapshot on the sleep screen, giving you a live statistics dashboard every time the device goes to sleep.
+
+**Pages:**
+
+| Page | Content |
+|---|---|
+| 1 | Today's summary (time + pages read) · Day streak · Week streak |
+| 2 | Last 7 days averages · This week totals · This month totals |
+| 3 | All-time stats (hours / pages / books) · Yearly summary · Monthly bar chart |
+
+**Features:**
+- All data fetched fresh from the Statistics plugin database on each sleep cycle
+- Page 0 (default) picks a different random page each time the device sleeps
+- Portrait orientation enforced; e-ink full-refresh before display
+- Wallpaper-aware: renders the SimpleUI wallpaper behind the stats when one is set
+- Fallback to white screen if the database is unavailable or rendering fails
+- Can be used standalone or alongside the **SimpleUI Home Screen on Sleep Screen** patch — both patches coexist without conflicts
+
+**Settings (via Settings → Wallpaper → Sleep screen):**
+
+| Setting | Description |
+|---|---|
+| Show Reading Insights on sleep screen | Radio option in the sleep screen type selector |
+| Insights page | `0` = random page each sleep cycle (default); `1`–`3` = fixed page — only active when the option above is selected |
+
+**Usage:**
+1. Go to **Settings → Screen → Sleep screen → Wallpaper**
+2. Select **"Show Reading Insights on sleep screen"**
+3. Optionally tap **"Insights page"** to pin a specific page (`1`, `2`, or `3`), or leave at `0` for random
+4. Put your device to sleep — your reading statistics will appear
+
+**Note:** This patch is disabled by default (opt-in). Enable it via **Tools → SimpleUI Extra → Patches**. Requires the Statistics plugin database to be present.
 
 </details>
 
@@ -441,7 +481,8 @@ Displays your SimpleUI home screen as the sleep screen (screensaver), replacing 
            ├── patch_coverdeck_description.lua
            ├── patch_module_copies.lua
            ├── patch_clock_date_cn.lua
-           └── patch_screensaver_homescreen.lua
+           ├── patch_screensaver_homescreen.lua
+           └── patch_screensaver_insights.lua
    ```
 
 3. **Restart KOReader** (or use *Top Menu → Settings → Start fresh*).
@@ -514,6 +555,7 @@ This improves startup performance by preventing the module from loading at all.
 - **Module Copies** — Place the same module on multiple homescreen pages
 - **Clock: Chinese Date Format** — Replace clock date with Chinese format (6月3日 周三)
 - **SimpleUI Home Screen on Sleep Screen** — Display your homescreen as the screensaver
+- **Reading Insights on Sleep Screen** — Display Reading Insights statistics as the screensaver
 
 **Disabling a patch:**
 
@@ -631,5 +673,5 @@ end
 - **[zenixlabs/koreader-frankenpatches-public](https://github.com/zenixlabs/koreader-frankenpatches-public)** — `module_reading_streaks.lua` and `module_reading_insights.lua` are derived from `2-reading-insights-popup.lua` from this repository, adapted as SimpleUI homescreen modules.
 - **[yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading)** — `module_currently_yanllsama.lua` is based on Yanllsama's enhanced Currently Reading module with dynamic grid system, customizable headers, and rich statistics.
 - **[@yefq](https://github.com/yefq)** — Contributed the hotfix utility (`utils/hotfix.lua`) and Chinese date format patch (`patch_clock_date_cn.lua`) in [PR #4](https://github.com/omer-faruq/simpleui_ext.koplugin/pull/4).
-- **GitHub Copilot (Claude Sonnet)** — This plugin was created with the assistance of AI.
+- This plugin was created with the assistance of AI.
 
