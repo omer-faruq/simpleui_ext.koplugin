@@ -204,11 +204,11 @@ Enhanced version of SimpleUI's built-in Currently Reading module with additional
 </details>
 
 <details>
-<summary><b>Currently Reading (Yanllsama)</b> — Enhanced reading dashboard with dynamic grid, customizable headers, and rich statistics</summary>
+<summary><b>Currently Reading (Yanllsama v1)</b> — Enhanced reading dashboard with dynamic grid, customizable headers, and 6 progress bar styles</summary>
 
-### Currently Reading (Yanllsama)
+### Currently Reading (Yanllsama v1)
 
-A completely redesigned, highly detailed, and fully dynamic reading statistics dashboard module with enriched data, brand new progress bar designs, dynamic grid management, and flexible interface options.
+A completely redesigned, highly detailed, and fully dynamic reading statistics dashboard module. While maintaining the solid foundation of the original module, it offers enriched data, brand new progress bar designs, dynamic grid management, and flexible interface options.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -475,7 +475,7 @@ Renders one of the three Reading Insights pages as a static snapshot on the slee
        │   ├── module_reading_streaks.lua
        │   ├── module_reading_insights.lua
        │   ├── module_currently_with_pace.lua
-       │   └── module_currently_yanllsama.lua
+       │   └── module_currently_yanllsama_v1.lua
        └── patches/
            ├── patch_coverdeck_exclude.lua
            ├── patch_coverdeck_description.lua
@@ -671,7 +671,7 @@ end
 - **[SimpleUI plugin](https://github.com/doctorhetfield-cmd/simpleui.koplugin)** — This plugin is an extension of SimpleUI and relies entirely on its homescreen module system, shared book-data helpers, and registry API.
 - **[quanganhdo/koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches)** — `module_recent_book_stats.lua` is a modified version of `2-reading-stats-popup.lua` from this repository, adapted as a SimpleUI homescreen module.
 - **[zenixlabs/koreader-frankenpatches-public](https://github.com/zenixlabs/koreader-frankenpatches-public)** — `module_reading_streaks.lua` and `module_reading_insights.lua` are derived from `2-reading-insights-popup.lua` from this repository, adapted as SimpleUI homescreen modules.
-- **[yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading)** — `module_currently_yanllsama.lua` is based on Yanllsama's enhanced Currently Reading module with dynamic grid system, customizable headers, and rich statistics.
+- **[yanllsama/koreader-enhanced-currently-reading](https://github.com/yanllsama/koreader-enhanced-currently-reading)** — `module_currently_yanllsama_v1.lua` is based on Yanllsama's enhanced Currently Reading module with dynamic grid system, customizable headers, and rich statistics.
 - **[@yefq](https://github.com/yefq)** — Contributed the hotfix utility (`utils/hotfix.lua`) and Chinese date format patch (`patch_clock_date_cn.lua`) in [PR #4](https://github.com/omer-faruq/simpleui_ext.koplugin/pull/4).
 - This plugin was created with the assistance of AI.
 

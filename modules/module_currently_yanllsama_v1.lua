@@ -1,4 +1,8 @@
--- module_currently_yanllsama.lua — Enhanced Currently Reading (SimpleUI Dashboard Module)
+-- module_currently_yanllsama_v1.lua — Enhanced Currently Reading (SimpleUI Dashboard Module) — V1 (Legacy)
+--
+-- This is the V1 (legacy) edition of the Enhanced Currently Reading module, kept
+-- side-by-side with the newer module_currently_yanllsama.lua so both can run
+-- independently with their own settings, IDs, and module entries.
 --
 -- Enhanced Currently Reading is a completely redesigned, highly detailed, and fully dynamic
 -- reading statistics dashboard module for KOReader's SimpleUI plugin.
@@ -82,34 +86,34 @@ local _BASE_PCT_W          = Screen:scaleBySize(32)
 local _BASE_INLINEPCT_FS   = Screen:scaleBySize(11)
 local _BASE_AUTHOR_GAP     = Screen:scaleBySize(6)
 
-local BAR_STYLE_KEY     = "yanllsama_bar_style"
-local COVER_GAP_KEY     = "yanllsama_cover_gap"
-local SK_TIME_FMT       = "yanllsama_time_format"
-local SK_EXCLUDE_PATHS  = "yanllsama_exclude_paths"
+local BAR_STYLE_KEY     = "yanllsama_v1_bar_style"
+local COVER_GAP_KEY     = "yanllsama_v1_cover_gap"
+local SK_TIME_FMT       = "yanllsama_v1_time_format"
+local SK_EXCLUDE_PATHS  = "yanllsama_v1_exclude_paths"
 local FMT_NICKEL        = "nickel"
 local FMT_XHYM          = "xhym"
 
-local GRID_COLS_KEY     = "yanllsama_grid_cols"
-local GRID_ROWS_KEY     = "yanllsama_grid_rows"
-local STAT_ORDER_KEY    = "yanllsama_stat_order"
-local ACTIVE_STATS_KEY  = "yanllsama_active_stats"
+local GRID_COLS_KEY     = "yanllsama_v1_grid_cols"
+local GRID_ROWS_KEY     = "yanllsama_v1_grid_rows"
+local STAT_ORDER_KEY    = "yanllsama_v1_stat_order"
+local ACTIVE_STATS_KEY  = "yanllsama_v1_active_stats"
 
-local VAL_FS_KEY        = "yanllsama_val_fs"
-local LBL_FS_KEY        = "yanllsama_lbl_fs"
-local TITLE_FS_KEY      = "yanllsama_title_fs"
-local AUTHOR_FS_KEY     = "yanllsama_author_fs"
+local VAL_FS_KEY        = "yanllsama_v1_val_fs"
+local LBL_FS_KEY        = "yanllsama_v1_lbl_fs"
+local TITLE_FS_KEY      = "yanllsama_v1_title_fs"
+local AUTHOR_FS_KEY     = "yanllsama_v1_author_fs"
 
-local VAL_FONT_KEY      = "yanllsama_val_font"
-local LBL_FONT_KEY      = "yanllsama_lbl_font"
-local TITLE_FONT_KEY    = "yanllsama_title_font"
-local AUTHOR_FONT_KEY   = "yanllsama_author_font"
+local VAL_FONT_KEY      = "yanllsama_v1_val_font"
+local LBL_FONT_KEY      = "yanllsama_v1_lbl_font"
+local TITLE_FONT_KEY    = "yanllsama_v1_title_font"
+local AUTHOR_FONT_KEY   = "yanllsama_v1_author_font"
 
-local VAL_BOLD_KEY      = "yanllsama_val_bold"
-local LBL_BOLD_KEY      = "yanllsama_lbl_bold"
+local VAL_BOLD_KEY      = "yanllsama_v1_val_bold"
+local LBL_BOLD_KEY      = "yanllsama_v1_lbl_bold"
 
-local SHOW_HEADERS_KEY  = "yanllsama_show_headers"
-local HEADER_TXT_PFX    = "yanllsama_header_txt_"
-local HEADER_WEIGHT_KEY = "yanllsama_header_weight"
+local SHOW_HEADERS_KEY  = "yanllsama_v1_show_headers"
+local HEADER_TXT_PFX    = "yanllsama_v1_header_txt_"
+local HEADER_WEIGHT_KEY = "yanllsama_v1_header_weight"
 
 local _STAT_LABELS = {
     book_time_left     = _("Time Left"),
@@ -518,12 +522,12 @@ end
 
 local M = {}
 
-M.id              = "currently_yanllsama"
-M.name            = _("Currently Reading (Yanllsama)")
+M.id              = "currently_yanllsama_v1"
+M.name            = _("Currently Reading (Yanllsama v1)")
 M.label           = _("Currently Reading")
-M.description     = _("Enhanced reading dashboard with dynamic grid (1-4 cols, 1-6 rows), customizable headers, rich statistics (10 metrics), and 6 progress bar styles. Tap book/author for description.")
+M.description     = _("[V1/Legacy] Enhanced reading dashboard with dynamic grid (1-4 cols, 1-6 rows), customizable headers, rich statistics (10 metrics), and 6 progress bar styles. Tap book/author for description.")
 M.default_enabled = false
-M.enabled_key     = "currently_yanllsama"
+M.enabled_key     = "currently_yanllsama_v1"
 M.default_on      = false
 M.has_covers      = true   
 M.is_book_mod     = true   
@@ -799,8 +803,8 @@ function M.getHeight(_ctx)
     local SH = getSH()
     if not SH then return Config.getScaledLabelH() end
     local pfx   = _ctx and _ctx.pfx or ""
-    local scale = Config.getModuleScale("currently_yanllsama", pfx)
-    local thumb_scale = Config.getThumbScale("currently_yanllsama", pfx)
+    local scale = Config.getModuleScale("currently_yanllsama_v1", pfx)
+    local thumb_scale = Config.getThumbScale("currently_yanllsama_v1", pfx)
     local cols = getGridCols(pfx)
     local rows = getGridRows(pfx)
     local show_h = getShowHeaders(pfx)
@@ -911,18 +915,18 @@ function M.getMenuItems(ctx_menu)
         Config.makeScaleItem({
             text_func    = function() return _lc("Scale") end, enabled_func = function() return not Config.isScaleLinked() end,
             title        = _lc("Scale"), info = _lc("Scale for this module.\n100% is the default size."),
-            get          = function() return Config.getModuleScalePct("currently_yanllsama", pfx) end, set = function(v) Config.setModuleScale(v, "currently_yanllsama", pfx) end, refresh = refresh,
+            get          = function() return Config.getModuleScalePct("currently_yanllsama_v1", pfx) end, set = function(v) Config.setModuleScale(v, "currently_yanllsama_v1", pfx) end, refresh = refresh,
         }),
         Config.makeScaleItem({
             text_func = function() return _lc("Cover size") end, title = _lc("Cover size"), info = _lc("Scale for the cover thumbnail only.\n100% is the default size."),
-            get       = function() return Config.getThumbScalePct("currently_yanllsama", pfx) end, set = function(v) Config.setThumbScale(v, "currently_yanllsama", pfx) end, refresh   = refresh,
+            get       = function() return Config.getThumbScalePct("currently_yanllsama_v1", pfx) end, set = function(v) Config.setThumbScale(v, "currently_yanllsama_v1", pfx) end, refresh   = refresh,
         }),
         Config.makeScaleItem({
             text_func = function() local pct = getCoverGapPct(pfx); return pct == 100 and _lc("Cover Spacing") or string.format("%s (%d%%)", _lc("Cover Spacing"), pct) end,
             separator = true, title = _lc("Cover Spacing"), info = _lc("Horizontal space between the cover and the text.\n100% is the default spacing."),
             get       = function() return getCoverGapPct(pfx) end, set = function(v) SUISettings:saveSetting(pfx .. COVER_GAP_KEY, v) end, refresh   = refresh, value_min = 0, value_max = 300, value_step = 10, default_value = 100,
         }),
-        Config.makeLabelToggleItem("currently_yanllsama", _("Currently Reading"), refresh, _lc),
+        Config.makeLabelToggleItem("currently_yanllsama_v1", _("Currently Reading"), refresh, _lc),
         
         {
             text = _lc("Statistics Layout & Appearance"),
@@ -1132,15 +1136,15 @@ function M.build(w, ctx)
     local SH = getSH()
     if not SH then return nil end
 
-    local c     = ctx.cfg and ctx.cfg.currently_yanllsama
+    local c     = ctx.cfg and ctx.cfg.currently_yanllsama_v1
     local pfx   = ctx.pfx or ""
     
     local current_fp = _getCurrentFP(ctx, pfx)
     if not current_fp then return nil end
     
-    local scale = c and c.scale or Config.getModuleScale("currently_yanllsama", pfx)
-    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently_yanllsama", pfx)
-    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently_yanllsama", pfx)
+    local scale = c and c.scale or Config.getModuleScale("currently_yanllsama_v1", pfx)
+    local thumb_scale = c and c.thumb_scale or Config.getThumbScale("currently_yanllsama_v1", pfx)
+    local lbl_scale   = c and c.lbl_scale   or Config.getItemLabelScale("currently_yanllsama_v1", pfx)
     local bar_style   = c and c.bar_style   or getBarStyle(pfx)
     
     local cols = getGridCols(pfx)
