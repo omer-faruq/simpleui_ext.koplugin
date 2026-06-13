@@ -299,11 +299,15 @@ end
 -- ---------------------------------------------------------------------------
 local M = {}
 
+-- Kept separate from M.label: applyLabelToggle() mutates M.label to nil when
+-- the section label is hidden, so it can't also serve as its own default.
+local _DEFAULT_LABEL = "Currently Reading"
+
 M.id              = "hero_currently"
 M.name            = "Hero Currently Reading"
 M.description     = "Large hero card showing currently reading book with cover, progress, and details"
 M.default_enabled = true   -- Loaded by simpleui_ext by default
-M.label           = "Currently Reading"
+M.label           = _DEFAULT_LABEL
 M.enabled_key     = "hero_currently"
 M.default_on      = false
 M.has_covers      = true    -- activates e-ink dithering and cover poll
@@ -360,7 +364,7 @@ function M.build(w, ctx)
     local SH       = getSH()
     if not Config or not Settings or not UI or not SH then return nil end
 
-    Config.applyLabelToggle(M, M.label)
+    Config.applyLabelToggle(M, _DEFAULT_LABEL)
 
     local pfx      = ctx.pfx or ""
     local excludes = getExcludePaths(pfx)

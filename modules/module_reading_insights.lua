@@ -960,12 +960,16 @@ local function buildInsightsWidget(w, ctx, data)
     }
 end
 
+-- Kept separate from module.label: applyLabelToggle() mutates module.label to
+-- nil when the section label is hidden, so it can't also serve as its own default.
+local _DEFAULT_LABEL = "Reading Insights"
+
 local module = {
     id = "reading_insights",
     name = "Reading Insights",
     description = "Yearly reading statistics and monthly chart with tappable bars",
     default_enabled = true,   -- Loaded by simpleui_ext by default
-    label = "Reading Insights",
+    label = _DEFAULT_LABEL,
     enabled_key = "reading_insights",
     default_on = false,
 }
@@ -973,7 +977,7 @@ local module = {
 function module.build(w, ctx)
     local ok_config, Config = pcall(require, "sui_config")
     if ok_config and Config then
-        Config.applyLabelToggle(module, module.label)
+        Config.applyLabelToggle(module, _DEFAULT_LABEL)
     end
     
     local ok, data = pcall(getInsightsData, ctx.pfx)

@@ -563,11 +563,15 @@ end
 
 local M = {}
 
+-- Kept separate from M.label: applyLabelToggle() mutates M.label to nil when
+-- the section label is hidden, so it can't also serve as its own default.
+local _DEFAULT_LABEL = "Recent Book Stats"
+
 M.id              = "recent_book_stats"
 M.name            = "Recent Book Stats"
 M.description     = "Statistics cards for recently read books with progress and reading time"
 M.default_enabled = true   -- Loaded by simpleui_ext by default
-M.label           = "Recent Book Stats"
+M.label           = _DEFAULT_LABEL
 M.enabled_key     = "recent_book_stats"
 M.default_on      = false
 M.is_book_mod     = true   -- suppresses the homescreen "no books yet" empty-state
@@ -596,7 +600,7 @@ function M.build(w, ctx)
     local UI     = getUI()
     if not Config or not UI then return nil end
 
-    Config.applyLabelToggle(M, M.label)
+    Config.applyLabelToggle(M, _DEFAULT_LABEL)
 
     local pfx   = ctx and ctx.pfx or ""
     local scale = Config.getModuleScale("recent_book_stats", pfx)
