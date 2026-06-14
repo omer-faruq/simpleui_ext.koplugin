@@ -169,6 +169,81 @@ local function getBookDescription(fp)
 end
 
 -- ---------------------------------------------------------------------------
+-- Highlight reader — returns a list of highlights for the given book
+-- (KOReader annotations with a highlight-type drawer), or nil when the book
+-- has none. Each entry is { text, chapter, pageno, pageref }.
+-- ---------------------------------------------------------------------------
+local _HIGHLIGHT_DRAWERS = {
+    highlight  = true,
+    lighten    = true,
+    underscore = true,
+}
+
+-- Collapses whitespace/newlines in highlight text (plain text extracted from
+-- the book, not HTML — unlike descriptions, so stripHTML's tag-stripping
+-- would risk eating legitimate "<"/">" characters).
+local function normalizeHighlightText(t)
+    t = t:gsub("%s+", " ")
+    t = t:match("^%s*(.-)%s*$") or t
+    return t ~= "" and t or nil
+end
+
+local function getBookHighlights(fp)
+    if not fp then return nil end
+    local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+    if not ok_lfs or lfs.attributes(fp, "mode") ~= "file" then return nil end
+    local ok_ds, DS = pcall(require, "docsettings")
+    if not ok_ds or not DS then return nil end
+    local ok, ds = pcall(DS.open, DS, fp)
+    if not ok or not ds then return nil end
+    local annotations = ds:readSetting("annotations")
+    pcall(function() ds:close() end)
+    if type(annotations) ~= "table" or #annotations == 0 then return nil end
+
+    local result = {}
+    for _, a in ipairs(annotations) do
+        if a.drawer and _HIGHLIGHT_DRAWERS[a.drawer]
+           and type(a.text) == "string" and a.text ~= "" then
+            local t = normalizeHighlightText(a.text)
+            if t then
+                result[#result + 1] = {
+                    text    = t,
+                    chapter = (type(a.chapter) == "string" and a.chapter ~= "") and a.chapter or nil,
+                    pageno  = a.pageno,
+                    pageref = a.pageref,
+                }
+            end
+        end
+    end
+    return #result > 0 and result or nil
+end
+
+-- Wraps a highlight's text in curly quotes (stripping any quote marks /
+-- leading dashes already present, mirroring SimpleUI's quote module) and, if
+-- the annotation carries chapter/page info, appends it as a second paragraph:
+--   “Some highlighted text.”
+--
+--   — Chapter 3 · p. 42
+local _LEADING_QUOTES  = '^["\'\u{201C}\u{2018}\u{201E}\u{201A}\u{00AB}\u{2039}%s]+'
+local _TRAILING_QUOTES = '["\'\u{201D}\u{2019}\u{201E}\u{201A}\u{00BB}\u{203A}%s]+$'
+
+local function formatHighlight(h)
+    local text = h.text:gsub(_LEADING_QUOTES, ''):gsub(_TRAILING_QUOTES, '')
+    text = text:gsub('^[\u{2014}\u{2013}]%s*', '')
+    local quoted = "\u{201C}" .. text .. "\u{201D}"
+
+    local meta = {}
+    if h.chapter then meta[#meta + 1] = h.chapter end
+    local pn = h.pageref or h.pageno
+    if pn then meta[#meta + 1] = "p. " .. tostring(pn) end
+
+    if #meta > 0 then
+        return quoted .. "\n\n\u{2014} " .. table.concat(meta, " \u{00B7} ")
+    end
+    return quoted
+end
+
+-- ---------------------------------------------------------------------------
 -- Stats DB: avg reading time per page (same query as module_currently)
 -- ---------------------------------------------------------------------------
 -- Read the cap from the Statistics plugin's own settings so the value always
@@ -269,6 +344,24 @@ local SK_SHOW_STATS    = "hero_currently_show_stats"
 local SK_SHOW_PROGRESS = "hero_currently_show_progress"
 local SK_PREVENT_CROP  = "hero_currently_prevent_crop"
 local SK_CROP_THRESHOLD = "hero_currently_crop_threshold"
+local SK_DESC_SOURCE   = "hero_currently_desc_source"
+
+-- ---------------------------------------------------------------------------
+-- Description-source setting helper: "description" (default) shows the book
+-- blurb; "highlight" shows a random highlight from the book's annotations,
+-- falling back to the description when the book has none.
+-- ---------------------------------------------------------------------------
+local function getDescSource(pfx)
+    local S = getSettings()
+    local v = S and S:readSetting(pfx .. SK_DESC_SOURCE)
+    return (v == "highlight") and "highlight" or "description"
+end
+
+-- Cache for the randomly-picked highlight, keyed by ctx table identity so the
+-- pick stays stable across clock-tick refreshes (which reuse the same ctx
+-- table) and only re-rolls on a full homescreen rebuild (new ctx) or when the
+-- currently-reading book changes.
+local _hl_pick = { ctx = nil, fp = nil, text = nil }
 
 -- ---------------------------------------------------------------------------
 -- Exclude-path helpers (mirrors module_recent_book_stats implementation)
@@ -318,6 +411,7 @@ M.needs           = { db = true }
 -- Called by the homescreen on hot-reload to drop cached references
 function M.reset()
     _SH = nil
+    _hl_pick = { ctx = nil, fp = nil, text = nil }
 end
 
 -- ---------------------------------------------------------------------------
@@ -405,7 +499,22 @@ function M.build(w, ctx)
     local cover = SH.getBookCover(fp, COVER_W, COVER_H, nil, stretch_limit)
                   or SH.coverPlaceholder(bd.title, bd.authors, COVER_W, COVER_H)
 
-    local desc_text = getBookDescription(fp)
+    -- Description-area content: either the book blurb, or (when the
+    -- "Highlight" source is selected) a randomly-picked highlight from this
+    -- book's annotations, falling back to the description if it has none.
+    local desc_text
+    if getDescSource(pfx) == "highlight" then
+        if _hl_pick.ctx ~= ctx or _hl_pick.fp ~= fp then
+            local hls    = getBookHighlights(fp)
+            local picked = hls and hls[math.random(#hls)]
+            _hl_pick.ctx  = ctx
+            _hl_pick.fp   = fp
+            _hl_pick.text = picked and formatHighlight(picked)
+        end
+        desc_text = _hl_pick.text or getBookDescription(fp)
+    else
+        desc_text = getBookDescription(fp)
+    end
 
     -- Colour theme
     local CLR_TEXT = Blitbuffer.COLOR_BLACK
@@ -864,6 +973,39 @@ function M.getMenuItems(ctx_menu)
             set          = function(v) Config.setModuleScale(v, "hero_currently", pfx) end,
             refresh      = refresh,
         }),
+        {
+            text_func  = function() return _lc("Description Content") end,
+            value_func = function()
+                return (getDescSource(pfx) == "highlight")
+                    and _lc("Highlight") or _lc("Description")
+            end,
+            sub_item_table = {
+                {
+                    text           = _lc("Description"),
+                    radio          = true,
+                    checked_func   = function() return getDescSource(pfx) == "description" end,
+                    keep_menu_open = true,
+                    callback       = function()
+                        if Settings then
+                            Settings:saveSetting(pfx .. SK_DESC_SOURCE, "description")
+                        end
+                        refresh()
+                    end,
+                },
+                {
+                    text           = _lc("Highlight (random, falls back to description)"),
+                    radio          = true,
+                    checked_func   = function() return getDescSource(pfx) == "highlight" end,
+                    keep_menu_open = true,
+                    callback       = function()
+                        if Settings then
+                            Settings:saveSetting(pfx .. SK_DESC_SOURCE, "highlight")
+                        end
+                        refresh()
+                    end,
+                },
+            },
+        },
         toggle_item("Show Frame",        "hero_currently_show_frame"),
         toggle_item("Solid Background",  "hero_currently_solid_bg"),
         toggle_item_on("Show Progress Bar", SK_SHOW_PROGRESS),
