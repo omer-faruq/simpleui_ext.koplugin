@@ -265,6 +265,30 @@ A completely redesigned, highly detailed, and fully dynamic reading statistics d
 In addition to new modules, this plugin applies transparent patches to SimpleUI's built-in modules to add missing functionality.
 
 <details>
+<summary><b>Recent Books — Extra Options</b> — Multi-row layout, row spacing, and Exclude Paths for the built-in Recent Books module</summary>
+
+### Recent Books — Extra Options
+
+Adds extra display options to SimpleUI's built-in **Recent Books** module without modifying its source file:
+
+**Features:**
+- **Rows** — Show 1-4 rows of up to 5 books each (up to 20 books total), instead of the fixed single row
+- **Row Spacing** — Adjustable vertical spacing between rows (0-300%); only shown when Rows > 1
+- **Exclude Paths from Recent** — Comma-separated path fragments; books whose path contains any fragment are skipped (identical to the filter on Cover Deck, Hero Currently Reading, etc.)
+
+**Settings (via Arrange Modules → Recent Books):**
+
+| Setting | Description |
+|---|---|
+| Rows | Number of rows of recent books to display (1-4, default: 1) |
+| Row Spacing | Vertical spacing between rows (0-300%, default: 100%); only active when Rows > 1 |
+| Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are skipped (e.g. `/mnt/onboard/rss, instapaper, cache`) |
+
+**Note:** When **Show Frame** or **Solid Background** is enabled on the Recent Books module, each row is rendered as its own bordered/background card rather than a single unified box. This patch is disabled by default (opt-in). Enable it via **Tools → SimpleUI Extra → Patches**.
+
+</details>
+
+<details>
 <summary><b>Cover Deck — Exclude Paths from Recent</b> — Filter books from Cover Deck's Recent Books source</summary>
 
 ### Cover Deck — Exclude Paths from Recent
@@ -477,6 +501,7 @@ Renders one of the three Reading Insights pages as a static snapshot on the slee
        │   ├── module_currently_with_pace.lua
        │   └── module_currently_yanllsama_v1.lua
        └── patches/
+           ├── patch_recent_extra.lua
            ├── patch_coverdeck_exclude.lua
            ├── patch_coverdeck_description.lua
            ├── patch_module_copies.lua
@@ -550,6 +575,7 @@ This improves startup performance by preventing the module from loading at all.
 
 **Available patches:**
 
+- **Recent Books — Extra Options** — Multi-row layout, row spacing, and Exclude Paths for the built-in Recent Books module
 - **Cover Deck — Exclude Paths from Recent** — Filter books from Cover Deck's Recent Books source
 - **Cover Deck — Description Strip** — Show book descriptions below/above the carousel
 - **Module Copies** — Place the same module on multiple homescreen pages
