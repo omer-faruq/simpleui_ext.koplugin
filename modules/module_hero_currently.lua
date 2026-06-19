@@ -345,12 +345,19 @@ local SK_SHOW_PROGRESS = "hero_currently_show_progress"
 local SK_PREVENT_CROP  = "hero_currently_prevent_crop"
 local SK_CROP_THRESHOLD = "hero_currently_crop_threshold"
 local SK_DESC_SOURCE   = "hero_currently_desc_source"
+local SK_DESC_FS_SCALE = "hero_currently_desc_fs_scale"
 
 -- ---------------------------------------------------------------------------
 -- Description-source setting helper: "description" (default) shows the book
 -- blurb; "highlight" shows a random highlight from the book's annotations,
 -- falling back to the description when the book has none.
 -- ---------------------------------------------------------------------------
+local function getDescFsScale(pfx)
+    local S = getSettings()
+    local v = S and tonumber(S:readSetting(pfx .. SK_DESC_FS_SCALE))
+    return (v and v > 0) and (v / 100.0) or 1.0
+end
+
 local function getDescSource(pfx)
     local S = getSettings()
     local v = S and S:readSetting(pfx .. SK_DESC_SOURCE)
@@ -474,7 +481,7 @@ function M.build(w, ctx)
     local cover_gap  = math.max(0, math.floor(_BASE_COVER_GAP  * scale))
     local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale))
     local author_fs  = math.max(7, math.floor(_BASE_AUTHOR_FS  * scale))
-    local desc_fs    = math.max(7, math.floor(_BASE_DESC_FS    * scale))
+    local desc_fs    = math.max(7, math.floor(_BASE_DESC_FS    * scale * getDescFsScale(pfx)))
     local prog_fs    = math.max(7, math.floor(_BASE_PROG_FS    * scale))
     local bar_h      = prog_fs  -- bookshelf: bar_height = 100% of face.size
     local title_gap  = math.max(1, math.floor(_BASE_TITLE_GAP  * scale))
@@ -1005,6 +1012,43 @@ function M.getMenuItems(ctx_menu)
                     end,
                 },
             },
+        },
+        {
+            text_func = function()
+                local S = getSettings()
+                local v = S and S:readSetting(pfx .. SK_DESC_FS_SCALE)
+                v = v and tonumber(v) or 100
+                return v == 100
+                    and _lc("Description Text Size")
+                    or  string.format("%s (%d%%)", _lc("Description Text Size"), v)
+            end,
+            keep_menu_open = true,
+            callback = function()
+                local SpinWidget = require("ui/widget/spinwidget")
+                local UIManager  = require("ui/uimanager")
+                local S = getSettings()
+                local current = (S and tonumber(S:readSetting(pfx .. SK_DESC_FS_SCALE))) or 100
+                local spin
+                spin = SpinWidget:new{
+                    title_text      = _lc("Description Text Size"),
+                    info_text       = _lc("Scales the description font size relative to default.\nLarger text shows fewer lines; smaller shows more."),
+                    value           = current,
+                    value_min       = 50,
+                    value_max       = 300,
+                    value_step      = 5,
+                    value_hold_step = 25,
+                    unit            = "%",
+                    ok_text         = _lc("Set"),
+                    callback        = function(spin_widget)
+                        if S then
+                            S:saveSetting(pfx .. SK_DESC_FS_SCALE, spin_widget.value)
+                        end
+                        UIManager:close(spin)
+                        refresh()
+                    end,
+                }
+                UIManager:show(spin)
+            end,
         },
         toggle_item("Show Frame",        "hero_currently_show_frame"),
         toggle_item("Solid Background",  "hero_currently_solid_bg"),
