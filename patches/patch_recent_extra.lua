@@ -10,13 +10,6 @@
 --      available on Cover Deck (patch_coverdeck_exclude) and other
 --      recent-books-based modules.
 --
---   3. "Ignore First Book" — when on, the very first entry of
---      ReadHistory (typically the same book as "Currently Reading", or
---      simply the most recently opened book) is skipped, so the Recent
---      Books module's data starts from the second book. Avoids redundant
---      visual emphasis on a book the user is likely already actively
---      reading / about to read.
---
 -- CONTRACT (required by main.lua's patch discovery):
 --   P.id              string  — unique identifier used in log messages
 --   P.apply           func()  — called once after SimpleUI has initialised; idempotent
@@ -95,15 +88,14 @@
 --                M.getHeight() by the configured row count, adding the
 --                row spacing between rows.
 --
---   M.getMenuItems() — appends "Rows", "Row Spacing", "Exclude Paths from
---                Recent" and "Ignore First Book" items to the target
---                module's menu (identical shape/behavior in both api_modes).
+--   M.getMenuItems() — appends "Rows", "Row Spacing" and "Exclude Paths
+--                from Recent" items to the target module's menu
+--                (identical shape/behavior in both api_modes).
 --
 -- SETTING KEYS (all prefixed by pfx, e.g. "simpleui_hs_")
 --   recent_rows              integer 1..MAX_ROWS, default 1
 --   recent_row_gap_pct       integer 0..300 (%), default 100
 --   recent_exclude_paths     comma/newline-separated path fragments
---   recent_ignore_first      bool, default false
 
 local logger = require("logger")
 local _      = require("sui_ext_i18n").translate
@@ -113,14 +105,13 @@ local PATCH_ID = "recent_extra"
 local P = {}
 P.id              = PATCH_ID
 P.name            = _("Recent Books Extra Options")
-P.description     = _("Adds multi-row layout, row spacing, 'Exclude Paths from Recent' and 'Ignore First Book' to the Recent Books module")
+P.description     = _("Adds multi-row layout, row spacing and 'Exclude Paths from Recent' to the Recent Books module")
 P.default_enabled = false  -- Opt-in: patches default to disabled
 local _applied = false
 
 local SETTING_ROWS         = "recent_rows"
 local SETTING_ROW_GAP_PCT  = "recent_row_gap_pct"
 local SETTING_EXCLUDE      = "recent_exclude_paths"
-local SETTING_IGNORE_FIRST = "recent_ignore_first"
 
 local MAX_ROWS = 4
 local PER_ROW  = 5  -- fallback: the recent module's default max_items
@@ -189,10 +180,6 @@ local function _getExcludePaths(SUISettings, pfx)
     return result
 end
 
-local function _getIgnoreFirst(SUISettings, pfx)
-    return SUISettings:readSetting(pfx .. SETTING_IGNORE_FIRST) == true
-end
-
 local function _isExcluded(fp, excludes)
     if not fp or #excludes == 0 then return false end
     for _i, frag in ipairs(excludes) do
@@ -254,12 +241,10 @@ end
 -- Collects up to `needed` recent file paths from ReadHistory, applying the
 -- same "finished book" filter as the recent sub-module's filterItem plus
 -- the exclude-paths filter. Skips current_fp so the result never duplicates
--- the "Currently Reading" book. When `ignore_first` is true, the very
--- first entry of ReadHistory (the most recently opened book) is skipped.
+-- the "Currently Reading" book.
 -- Returns {} when ReadHistory is unavailable; the caller then falls back
 -- to the original build() to render the empty state.
-local function _collectRecentFps(needed, excludes, ignore_first,
-                                 show_finished, ctx)
+local function _collectRecentFps(needed, excludes, show_finished, ctx)
     local ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
     local ok_rh,  RH  = pcall(require, "readhistory")
     if not ok_rh or not RH then return {} end
@@ -269,8 +254,7 @@ local function _collectRecentFps(needed, excludes, ignore_first,
     if not RH.hist then return {} end
 
     local result = {}
-    local start_idx = ignore_first and 2 or 1
-    for i = start_idx, #(RH.hist) do
+    for i = 1, #(RH.hist) do
         local fp = RH.hist[i] and RH.hist[i].file
         if _shouldInclude(fp, ctx, excludes, show_finished,
                           ok_lfs and lfs or nil) then
@@ -333,22 +317,21 @@ function P.apply()
         local pfx          = (ctx and ctx.pfx) or ""
         local rows         = _getRows(SUISettings, pfx)
         local excludes     = _getExcludePaths(SUISettings, pfx)
-        local ignore_first = _getIgnoreFirst(SUISettings, pfx)
         local show_finished = SUISettings:readSetting(pfx .. "recent_show_finished") == true
 
         -- All options at default: take the fast path through the original.
-        if rows <= 1 and #excludes == 0 and not ignore_first then
+        if rows <= 1 and #excludes == 0 then
             return orig_build(w, ctx)
         end
 
         -- Self-collect up to (rows * PER_ROW) entries from ReadHistory,
-        -- applying excludes + ignore_first + the recent module's own
-        -- finished-book filter. ctx is the live homescreen ctx. This
-        -- collection logic is identical in both api_modes: it only reads
-        -- generic ctx fields (current_fp, prefetched), never the
-        -- module-specific cache.
+        -- applying excludes + the recent module's own finished-book
+        -- filter. ctx is the live homescreen ctx. This collection logic
+        -- is identical in both api_modes: it only reads generic ctx
+        -- fields (current_fp, prefetched), never the module-specific
+        -- cache.
         local per_row = _perRow(pfx)
-        local fps = _collectRecentFps(rows * per_row, excludes, ignore_first,
+        local fps = _collectRecentFps(rows * per_row, excludes,
                                       show_finished, ctx)
         if not fps or #fps == 0 then
             return orig_build(w, ctx)
@@ -549,17 +532,6 @@ function P.apply()
                 }
                 UIManager:show(dlg)
                 dlg:onShowKeyboard()
-            end,
-        }
-
-        items[#items + 1] = {
-            text           = _("Ignore First Book"),
-            checked_func   = function() return _getIgnoreFirst(SUISettings, pfx) end,
-            keep_menu_open = true,
-            callback       = function()
-                SUISettings:saveSetting(pfx .. SETTING_IGNORE_FIRST,
-                    not _getIgnoreFirst(SUISettings, pfx))
-                refresh()
             end,
         }
 
