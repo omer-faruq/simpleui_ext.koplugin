@@ -293,6 +293,78 @@ function M.wallpaperAPI()
 end
 
 -- ---------------------------------------------------------------------------
+-- M.themeColor(role) -> Blitbuffer color | nil
+--
+-- SimpleUI <= 2.5 exposed a user-themable palette through
+-- sui_style.getThemeColor(role). It returned nil for every role the user had
+-- not overridden, so each caller fell back to its own hard-coded default --
+-- which is why almost every call site in this plugin reads
+--     local c = SUIStyle.getThemeColor("fg") or Blitbuffer.COLOR_BLACK
+--
+-- SimpleUI 2.6 dropped the theming feature outright: getThemeColor,
+-- setThemeColor, resetTheme and makeThemeMenuItems are gone, replaced by the
+-- fixed SUIStyle.COLOR catalog (text_primary / text_secondary / surface /
+-- gray / ...).
+--
+-- Every one of those call sites guarded the REQUIRE ("ok_ss and SUIStyle")
+-- but not the FUNCTION, so on 2.6 they all raise
+--     attempt to call field 'getThemeColor' (a nil value)
+-- from inside build(). sui_screen_engine pcalls mod.build(), so this never
+-- surfaced as a crash: the module just silently painted nothing. The same
+-- throw inside patch_coverdeck_description -- which runs within SimpleUI's
+-- OWN module_coverdeck build -- took the built-in coverdeck down with it,
+-- while modules that never touched sui_style (reading_insights,
+-- reading_streaks) kept working. That is the whole "modules vanished after
+-- the 2.6 upgrade" bug.
+--
+-- This resolves a role against whichever mechanism the installed SimpleUI
+-- actually has:
+--   <= 2.5  the live getThemeColor, so user themes keep working unchanged;
+--   >= 2.6  nil for every role -- there is no theming to honour any more.
+--
+-- WHY 2.6 RETURNS nil RATHER THAN THE NEAREST SUIStyle.COLOR ENTRY
+--   Mapping roles onto the new catalog looks like the faithful translation,
+--   but it silently REPAINTS text these modules never asked to be repainted.
+--   The clearest case is "text_secondary": on <= 2.5 an unthemed install
+--   returned nil there, so every call site fell through to its own default,
+--   which is UI.CLR_TEXT_SUB -- black on 2.5 AND on 2.6, where SimpleUI's own
+--   modules still paint their secondary text with it. Handing back
+--   SUIStyle.COLOR.text_secondary (COLOR_DARK_GRAY, 0x88) instead turns that
+--   text mid-grey: washed out on e-ink, and lighter than the built-in
+--   modules sitting right next to it. "separator" does the same to
+--   module_recent_book_stats' rules, black by default, 0x48 via COLOR.gray.
+--
+--   nil is what an unthemed <= 2.5 install returned for EVERY role, so it is
+--   also what reproduces the colours these modules actually shipped with.
+--   The <= 2.5 branch stays intact, so a user theme on an older SimpleUI is
+--   still honoured; only 2.6+, which has no theme to read, goes plain.
+-- ---------------------------------------------------------------------------
+
+local function _styleModule()
+    local ss = package.loaded["sui_style"] or package.loaded["features/sui_style"]
+    if type(ss) == "table" then return ss end
+    local ok, m = pcall(require, "features/sui_style")
+    if ok and type(m) == "table" then return m end
+    return nil
+end
+
+function M.themeColor(role)
+    local SS = _styleModule()
+    if not SS then return nil end
+
+    -- <= 2.5: honour the user's own theme.
+    if type(SS.getThemeColor) == "function" then
+        local ok, c = pcall(SS.getThemeColor, role)
+        if ok then return c end
+        return nil
+    end
+
+    -- >= 2.6: no theming exists; the caller keeps its own default. See the
+    -- "WHY 2.6 RETURNS nil" note above before adding a COLOR mapping here.
+    return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- M.syncAliases()
 --
 -- Drops any alias entry from package.loaded that no longer points at the same

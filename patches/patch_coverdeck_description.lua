@@ -361,9 +361,12 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
     local ok_ui, UI = pcall(require, "sui_core")
     local PAD = ok_ui and UI and UI.PAD or Screen:scaleBySize(8)
 
-    local ok_ss, SUIStyle = pcall(require, "sui_style")
-    -- Same fg color as the coverdeck title (CLR_TEXT_EFF in module_coverdeck)
-    local CLR_TEXT = (ok_ss and SUIStyle and SUIStyle.getThemeColor("fg"))
+    -- Same fg color as the coverdeck title (CLR_TEXT_EFF in module_coverdeck).
+    -- Resolved through the compat layer: this code runs INSIDE SimpleUI's own
+    -- module_coverdeck build, so calling a sui_style function that 2.6 removed
+    -- would throw and take the built-in coverdeck down with the description.
+    local ok_cp, SUICompat = pcall(require, "utils/sui_compat")
+    local CLR_TEXT = (ok_cp and SUICompat and SUICompat.themeColor("fg"))
                   or Blitbuffer.COLOR_BLACK
 
     -- Font size: user base (pt) scaled by the same module + label scale that

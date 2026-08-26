@@ -53,6 +53,9 @@ local util            = require("util")
 local Config       = require("sui_config")
 local UI           = require("sui_core")
 local SUISettings  = require("sui_store")
+-- Theme colours go through the compat layer, never sui_style directly:
+-- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
+local SUICompat    = require("utils/sui_compat")
 local PAD          = UI.PAD
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 
@@ -63,15 +66,6 @@ local function getSH()
         if ok and m then _SH = m else logger.dbg("simpleui: cannot load module_books_shared") end
     end
     return _SH
-end
-
-local _SUIStyle = nil
-local function getSUIStyle()
-    if not _SUIStyle then
-        local ok, m = pcall(require, "sui_style")
-        if ok and m then _SUIStyle = m end
-    end
-    return _SUIStyle
 end
 
 local _CLR_DARK   = Blitbuffer.COLOR_BLACK
@@ -537,7 +531,7 @@ M.is_book_mod     = true
 M.needs           = { db = true, books = true } 
 
 function M.reset()
-    _SH = nil; _SUIStyle = nil; _cache = nil
+    _SH = nil; _cache = nil
 end
 
 local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_scale, bar_style, cols, rows, current_fp)
@@ -549,11 +543,8 @@ local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_sca
     local _CLR_DARK_EFF = _CLR_DARK
     local CLR_TEXT_SUB_EFF = CLR_TEXT_SUB
 
-    local SS = getSUIStyle()
-    if SS then
-        _CLR_DARK_EFF = SS.getThemeColor("fg") or _CLR_DARK_EFF
-        CLR_TEXT_SUB_EFF = SS.getThemeColor("text_secondary") or _CLR_DARK_EFF
-    end
+    _CLR_DARK_EFF    = SUICompat.themeColor("fg")             or _CLR_DARK_EFF
+    CLR_TEXT_SUB_EFF = SUICompat.themeColor("text_secondary")  or _CLR_DARK_EFF
 
     local val_fg_color = _CLR_DARK_EFF
     local lbl_fg_color = CLR_TEXT_SUB_EFF
@@ -622,7 +613,11 @@ local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_sca
     elseif hdr_weight == "medium" then sec_fs = Font:getFace("NotoSans-Regular.ttf", hdr_base_fs)
     else sec_fs = Font:getFace("NotoSans-Bold.ttf", hdr_base_fs) end
 
-    local CLR_HDR_BG = SS and (SS.getThemeColor("muted") or SS.getThemeColor("divider")) or Blitbuffer.COLOR_GRAY_D
+    -- "muted" / "divider" were never real theme roles (no SimpleUI version
+    -- defines them), so this has always resolved to the default below.
+    local CLR_HDR_BG = SUICompat.themeColor("muted")
+                    or SUICompat.themeColor("divider")
+                    or Blitbuffer.COLOR_GRAY_D
     
     local function mkDynamicGrid(items)
         local grid_args = { align = "left" }

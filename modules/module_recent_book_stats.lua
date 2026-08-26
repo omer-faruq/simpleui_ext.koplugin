@@ -53,7 +53,7 @@ local _ = require("sui_ext_i18n").translate
 -- ---------------------------------------------------------------------------
 -- Lazy-loaded SimpleUI helpers (unavailable until SimpleUI is fully loaded)
 -- ---------------------------------------------------------------------------
-local _Config, _SUISettings, _UI, _SUIStyle
+local _Config, _SUISettings, _UI, _SUICompat
 
 local function getConfig()
     if not _Config then
@@ -79,12 +79,15 @@ local function getUI()
     return _UI
 end
 
-local function getSUIStyle()
-    if not _SUIStyle then
-        local ok, m = pcall(require, "sui_style")
-        if ok and m then _SUIStyle = m end
+-- Theme colours go through the compat layer, never sui_style directly:
+-- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
+local function themeColor(role)
+    if not _SUICompat then
+        local ok, m = pcall(require, "utils/sui_compat")
+        if ok and m then _SUICompat = m end
     end
-    return _SUIStyle
+    if not (_SUICompat and _SUICompat.themeColor) then return nil end
+    return _SUICompat.themeColor(role)
 end
 
 -- ---------------------------------------------------------------------------
@@ -585,7 +588,7 @@ function M.reset()
     _Config      = nil
     _SUISettings = nil
     _UI          = nil
-    _SUIStyle    = nil
+    _SUICompat   = nil
     _cache       = nil   -- invalidate on hot-reload
 end
 
@@ -624,16 +627,11 @@ function M.build(w, ctx)
     local CLR_HDR_BG = Blitbuffer.COLOR_GRAY_D   -- 0xDD — more prominent than E
     local CLR_TEXT   = Blitbuffer.COLOR_BLACK
     local CLR_SEP    = Blitbuffer.COLOR_BLACK
-    local SS = getSUIStyle()
-    if SS then
-        -- "muted" / "divider" tends to be darker than "surface",
-        -- giving a clear visual weight to section headers.
-        CLR_HDR_BG = SS.getThemeColor("muted")
-                     or SS.getThemeColor("divider")
-                     or CLR_HDR_BG
-        CLR_TEXT   = SS.getThemeColor("fg")         or CLR_TEXT
-        CLR_SEP    = SS.getThemeColor("separator")  or CLR_SEP
-    end
+    -- "muted" / "divider" were never real theme roles (no SimpleUI version
+    -- defines them), so CLR_HDR_BG has always kept its default below.
+    CLR_HDR_BG = themeColor("muted") or themeColor("divider") or CLR_HDR_BG
+    CLR_TEXT   = themeColor("fg")        or CLR_TEXT
+    CLR_SEP    = themeColor("separator") or CLR_SEP
 
     -- Fonts — side-by-side layout: larger values, compact labels
     local base_val_fs = 30

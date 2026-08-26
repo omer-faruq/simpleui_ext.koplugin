@@ -34,6 +34,9 @@ local VerticalSpan    = require("ui/widget/verticalspan")
 local Config       = require("sui_config")
 local UI           = require("sui_core")
 local SUISettings = require("sui_store")
+-- Theme colours go through the compat layer, never sui_style directly:
+-- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
+local SUICompat    = require("utils/sui_compat")
 local PAD          = UI.PAD
 local LABEL_H      = UI.LABEL_H
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -594,9 +597,8 @@ function M.build(w, ctx)
     local CLR_PLACEHOLDER = Blitbuffer.gray(0.55)
 
     -- Theme: when fg is set use it for all text; otherwise fall back to module defaults.
-    local ok_ss, SUIStyle  = pcall(require, "sui_style")
-    local _theme_fg        = ok_ss and SUIStyle and SUIStyle.getThemeColor("fg")
-    local _theme_secondary = ok_ss and SUIStyle and SUIStyle.getThemeColor("text_secondary")
+    local _theme_fg        = SUICompat.themeColor("fg")
+    local _theme_secondary = SUICompat.themeColor("text_secondary")
     local _CLR_DARK_EFF    = _theme_fg or _CLR_DARK
     local CLR_TEXT_SUB_EFF = _theme_secondary or _theme_fg or CLR_TEXT_SUB
     local CLR_PH_EFF       = _theme_secondary or _theme_fg or CLR_PLACEHOLDER

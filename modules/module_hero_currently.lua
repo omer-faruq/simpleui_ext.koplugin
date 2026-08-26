@@ -100,6 +100,18 @@ local function getUI()
     return _UI
 end
 
+-- Theme colours go through the compat layer, never sui_style directly:
+-- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
+local _SUICompat
+local function themeColor(role)
+    if not _SUICompat then
+        local ok, m = pcall(require, "utils/sui_compat")
+        if ok and m then _SUICompat = m end
+    end
+    if not (_SUICompat and _SUICompat.themeColor) then return nil end
+    return _SUICompat.themeColor(role)
+end
+
 -- ---------------------------------------------------------------------------
 -- HTML stripping (book descriptions from EPUBs often contain markup)
 -- ---------------------------------------------------------------------------
@@ -786,12 +798,8 @@ function M.build(w, ctx)
     -- Colour theme
     local CLR_TEXT = Blitbuffer.COLOR_BLACK
     local CLR_SUB  = UI.CLR_TEXT_SUB or Blitbuffer.gray(0.45)
-    local ok_ss, SUIStyle = pcall(require, "sui_style")
-    if ok_ss and SUIStyle then
-        CLR_TEXT = SUIStyle.getThemeColor("fg")              or CLR_TEXT
-        CLR_SUB  = SUIStyle.getThemeColor("text_secondary")
-                   or SUIStyle.getThemeColor("fg")           or CLR_SUB
-    end
+    CLR_TEXT = themeColor("fg")                                or CLR_TEXT
+    CLR_SUB  = themeColor("text_secondary") or themeColor("fg") or CLR_SUB
 
     -- Text column width
     local tw = w - PAD - COVER_W - cover_gap - PAD
@@ -1075,12 +1083,9 @@ function M.build(w, ctx)
     local radius     = has_box and math.floor(Screen:scaleBySize(12) * scale) or 0
     local border_clr = Blitbuffer.gray(0.72)
     local bg_color   = false  -- transparent by default; wallpaper shows through
-    if ok_ss and SUIStyle then
-        border_clr = SUIStyle.getThemeColor("separator") or border_clr
-    end
+    border_clr = themeColor("separator") or border_clr
     if solid_bg then
-        bg_color = (ok_ss and SUIStyle and SUIStyle.getThemeColor("bg"))
-                   or Blitbuffer.COLOR_WHITE
+        bg_color = themeColor("bg") or Blitbuffer.COLOR_WHITE
     end
 
     -- cover_tap wraps the cover image with a Tap zone that opens the book.
