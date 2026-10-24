@@ -59,6 +59,16 @@ local SUICompat    = require("utils/sui_compat")
 local PAD          = UI.PAD
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 
+-- SimpleUI 3.0 dropped makeLabelToggleItem's default_label argument: it is
+-- (mod_id, refresh, _lc) there, (mod_id, default_label, refresh, _lc) before.
+-- applyLabelToggle went away in the same change, so it tells the two apart.
+local function makeLabelToggleItem(Config, mod_id, label, refresh, _lc)
+    if type(Config.applyLabelToggle) == "function" then
+        return Config.makeLabelToggleItem(mod_id, label, refresh, _lc)
+    end
+    return Config.makeLabelToggleItem(mod_id, refresh, _lc)
+end
+
 local _SH = nil
 local function getSH()
     if not _SH then
@@ -570,7 +580,7 @@ local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_sca
     local total_isep_w = (ig * 2 + Size.line.medium) * (cols - 1)
     local icol_w   = math.max(1, math.floor((tw - 2 * ip - total_isep_w) / cols))
 
-    local has_wp = ctx.has_wallpaper
+    local has_wp = (ctx.text_alpha or ctx.has_wallpaper)
     local function make_tbw(args)
         args.fgcolor = args.fgcolor or _CLR_DARK_EFF
         if has_wp and UI and UI.makeAlphaTextBox then return UI.makeAlphaTextBox(args) end
@@ -923,7 +933,7 @@ function M.getMenuItems(ctx_menu)
             separator = true, title = _("Cover Spacing"), info = _("Horizontal space between the cover and the text.\n100% is the default spacing."),
             get       = function() return getCoverGapPct(pfx) end, set = function(v) SUISettings:saveSetting(pfx .. COVER_GAP_KEY, v) end, refresh   = refresh, value_min = 0, value_max = 300, value_step = 10, default_value = 100,
         }),
-        Config.makeLabelToggleItem("currently_yanllsama_v1", _("Currently Reading"), refresh, _),
+        makeLabelToggleItem(Config, "currently_yanllsama_v1", _("Currently Reading"), refresh, _),
         
         {
             text = _("Statistics Layout & Appearance"),
@@ -1128,7 +1138,7 @@ function M.getMenuItems(ctx_menu)
 end
 
 function M.build(w, ctx)
-    Config.applyLabelToggle(M, _("Currently Reading"))
+    SUICompat.applyLabel(M, _("Currently Reading"))
 
     local SH = getSH()
     if not SH then return nil end

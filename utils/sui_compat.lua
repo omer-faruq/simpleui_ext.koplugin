@@ -37,9 +37,12 @@ local logger = require("logger")
 
 -- Folders SimpleUI 2.5 spreads its internals over, most likely first.
 -- "" keeps a flat (≤2.4) layout working for "desktop_modules/x" style names.
+-- 3.0 added features/dialogs/, modules/reading_stats/ (module_reading_stats
+-- moved there) and screens/insights/.
 local SUI_DIRS = {
     "infra/", "screens/", "modules/", "features/",
-    "engines/", "features/library/", "",
+    "engines/", "features/library/", "features/dialogs/",
+    "modules/reading_stats/", "screens/insights/", "",
 }
 
 -- Only names that can only ever be SimpleUI's. Anything else is left to the
@@ -362,6 +365,31 @@ function M.themeColor(role)
     -- >= 2.6: no theming exists; the caller keeps its own default. See the
     -- "WHY 2.6 RETURNS nil" note above before adding a COLOR mapping here.
     return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- M.applyLabel(mod, default_label)
+--
+-- SimpleUI <= 2.6 had Config.applyLabelToggle(mod, label), which set
+-- mod.label to nil while the user's "Show section label" toggle was off.
+-- SimpleUI 3.0 removed it: the label descriptor
+-- (engines/sui_section_label.lua) now checks Config.isLabelHidden itself and
+-- M.label must stay set. Calling the missing function threw inside each
+-- module's getHeight/build, which the engine swallowed -- the module simply
+-- vanished. Use the old toggle where it exists, otherwise just set the label.
+-- ---------------------------------------------------------------------------
+function M.applyLabel(mod, default_label)
+    if type(mod) ~= "table" then return end
+    local Config = package.loaded["infra/sui_config"] or package.loaded["sui_config"]
+    if not Config then
+        local ok, m = pcall(require, "infra/sui_config")
+        if ok then Config = m end
+    end
+    if type(Config) == "table" and type(Config.applyLabelToggle) == "function" then
+        Config.applyLabelToggle(mod, default_label)
+    else
+        mod.label = default_label
+    end
 end
 
 -- ---------------------------------------------------------------------------

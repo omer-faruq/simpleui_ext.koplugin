@@ -201,11 +201,47 @@ local function _isExcluded(fp, excludes)
     return false
 end
 
+local function _getSH()
+    local ok, SH = pcall(require, "desktop_modules/module_books_shared")
+    return ok and type(SH) == "table" and SH or nil
+end
+
+-- SimpleUI 3.0 keys a book known to a virtual library (Kobo plugin) by its
+-- virtual path in ctx.current_fp / ctx.recent_fps (SH.prefetchBooks), so the
+-- paths taken from ReadHistory are mapped the same way. Identity on
+-- SimpleUI <= 2.6, which has no such module.
+local function _toVirtual(fp)
+    local ok, VP = pcall(require, "infra/sui_virtual_paths")
+    if ok and type(VP) == "table" and type(VP.toVirtual) == "function" then
+        local ok2, vfp = pcall(VP.toVirtual, fp)
+        if ok2 and vfp then return vfp end
+    end
+    return fp
+end
+
+-- Whether the Currently Reading book is left out of the recent books. A
+-- screen-wide setting since SimpleUI 3.0 ("recent" book source); always on
+-- before that.
+local function _excludeCurrent(pfx)
+    local SH = _getSH()
+    if SH and type(SH.isCurrentExcluded) == "function" then
+        local ok, v = pcall(SH.isCurrentExcluded, pfx)
+        if ok then return v ~= false end
+    end
+    return true
+end
+
 -- Mirrors module_book_rows's recent sub-module filterItem: excludes finished
--- books unless "Show finished books" is on. Prefetched data is preferred; if
--- missing, falls back to opening DocSettings directly.
+-- books unless "Show finished books" is on. SimpleUI 3.0's SH.isFinished
+-- (prefetched record, else its cached sidecar) is preferred; otherwise
+-- prefetched data, then DocSettings opened directly.
 local function _isFinished(fp, show_finished, ctx)
     if show_finished then return false end
+    local SH = _getSH()
+    if SH and type(SH.isFinished) == "function" then
+        local ok, done = pcall(SH.isFinished, fp, ctx and ctx.prefetched)
+        if ok then return done == true end
+    end
     local pd = ctx and ctx.prefetched and ctx.prefetched[fp]
     if pd and pd ~= false then
         local pct = pd.percent or 0
@@ -234,9 +270,11 @@ end
 -- diverge; if SimpleUI's filterItem changes (e.g. a new status filter),
 -- this function must change in lockstep — otherwise users will see the
 -- recent books list look different with this patch enabled vs. disabled.
-local function _shouldInclude(fp, ctx, excludes, show_finished, lfs)
-    if not fp then return false end
-    if fp == (ctx and ctx.current_fp) then return false end
+--
+-- `fp` is a real ReadHistory path. Returns the path to list (virtual when
+-- the book has one, see _toVirtual), or nil when the book is left out.
+local function _shouldInclude(fp, ctx, excludes, show_finished, lfs, exclude_current)
+    if not fp then return nil end
     -- lfs.attributes can throw on broken symlinks / permission errors /
     -- filesystems returning EBADF mid-iteration. A single bad fp must
     -- not abort the entire recent-list collection — treat any lfs
@@ -244,11 +282,13 @@ local function _shouldInclude(fp, ctx, excludes, show_finished, lfs)
     if lfs then
         local mode
         local ok = pcall(function() mode = lfs.attributes(fp, "mode") end)
-        if not ok or mode ~= "file" then return false end
+        if not ok or mode ~= "file" then return nil end
     end
-    if _isExcluded(fp, excludes) then return false end
-    if _isFinished(fp, show_finished, ctx) then return false end
-    return true
+    if _isExcluded(fp, excludes) then return nil end
+    local vfp = _toVirtual(fp)
+    if exclude_current and vfp == (ctx and ctx.current_fp) then return nil end
+    if _isFinished(vfp, show_finished, ctx) then return nil end
+    return vfp
 end
 
 -- Collects up to `needed` recent file paths from ReadHistory, applying the
@@ -268,12 +308,13 @@ local function _collectRecentFps(needed, excludes, ignore_first,
     end
     if not RH.hist then return {} end
 
+    local exclude_current = _excludeCurrent(ctx and ctx.pfx or "")
     local result = {}
     local start_idx = ignore_first and 2 or 1
     for i = start_idx, #(RH.hist) do
-        local fp = RH.hist[i] and RH.hist[i].file
-        if _shouldInclude(fp, ctx, excludes, show_finished,
-                          ok_lfs and lfs or nil) then
+        local fp = _shouldInclude(RH.hist[i] and RH.hist[i].file, ctx, excludes,
+                                  show_finished, ok_lfs and lfs or nil, exclude_current)
+        if fp then
             result[#result + 1] = fp
             if #result >= needed then break end
         end
@@ -373,8 +414,24 @@ function P.apply()
         local orig_recent    = ctx.recent_fps
         local orig_cache_key = ctx[CACHE_KEY]
         local orig_focus_idx = ctx.kb_recent_focus_idx
+        local orig_kb_stops  = ctx.kbStops
+
+        -- SimpleUI 3.0 D-pad focus: each GridRenderer.build registers its
+        -- covers as the focus row "<id>:r1" (UI.setFocusRows). Built once per
+        -- row, every call would overwrite that same row and only the last
+        -- row of covers stayed reachable. Renumber row r's key to ":r<r>".
+        local mod_id = target_mod.id or "recent"
+        local function kbStopsForRow(r)
+            if not orig_kb_stops or r == 1 then return orig_kb_stops end
+            return function(key, stops)
+                local base, n = tostring(key):match("^(.*):r(%d+)$")
+                if base == mod_id then key = base .. ":r" .. (tonumber(n) + r - 1) end
+                return orig_kb_stops(key, stops)
+            end
+        end
 
         local row_widgets = {}
+        local build_err
         for r = 1, rows do
             local from = (r - 1) * per_row + 1
             if from > #fps then break end
@@ -406,7 +463,9 @@ function P.apply()
                 ctx.kb_recent_focus_idx = nil
             end
 
-            local row_widget = orig_build(w, ctx)
+            ctx.kbStops = kbStopsForRow(r)
+            local ok_b, row_widget = pcall(orig_build, w, ctx)
+            if not ok_b then build_err = row_widget; break end
             if row_widget then
                 row_widgets[#row_widgets + 1] = row_widget
             end
@@ -416,10 +475,13 @@ function P.apply()
         -- (which the homescreen triggers on its own refresh path) starts
         -- from the unmodified source instead of seeing a stale slice. In
         -- Lua, `t.x = nil` and "key absent" are equivalent, so a single
-        -- assignment handles both cases.
+        -- assignment handles both cases. Also done when a row's build threw
+        -- (the engine pcalls build and keeps using this ctx).
         ctx.recent_fps          = orig_recent
         ctx[CACHE_KEY]          = orig_cache_key
         ctx.kb_recent_focus_idx = orig_focus_idx
+        ctx.kbStops             = orig_kb_stops
+        if build_err ~= nil then error(build_err, 0) end
 
         if #row_widgets == 0 then return nil end
         if #row_widgets == 1 then return row_widgets[1] end
@@ -458,9 +520,17 @@ function P.apply()
         local h_one = orig_getHeight(ctx)
         if rows <= 1 then return h_one end
 
+        local row_gap = _getRowGapPx(SUISettings, pfx)
+        -- SimpleUI 3.0 exposes the grid height alone; the rest of h_one is
+        -- the section label, which is 0 while the label is hidden (the
+        -- getScaledLabelH() fallback below would assume it always shows).
+        if type(target_mod.getGridHeight) == "function" then
+            local grid_h = target_mod.getGridHeight(ctx)
+            return (h_one - grid_h) + rows * grid_h + (rows - 1) * row_gap
+        end
+
         local label_h = require("sui_config").getScaledLabelH()
         local cell_h  = h_one - label_h
-        local row_gap = _getRowGapPx(SUISettings, pfx)
         return label_h + rows * cell_h + (rows - 1) * row_gap
     end
 

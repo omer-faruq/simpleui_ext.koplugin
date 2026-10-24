@@ -103,13 +103,28 @@ end
 -- Theme colours go through the compat layer, never sui_style directly:
 -- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
 local _SUICompat
-local function themeColor(role)
+local function getSUICompat()
     if not _SUICompat then
         local ok, m = pcall(require, "utils/sui_compat")
         if ok and m then _SUICompat = m end
     end
-    if not (_SUICompat and _SUICompat.themeColor) then return nil end
-    return _SUICompat.themeColor(role)
+    return _SUICompat
+end
+
+local function themeColor(role)
+    local Compat = getSUICompat()
+    if not (Compat and Compat.themeColor) then return nil end
+    return Compat.themeColor(role)
+end
+
+-- SimpleUI 3.0 dropped makeLabelToggleItem's default_label argument: it is
+-- (mod_id, refresh, _lc) there, (mod_id, default_label, refresh, _lc) before.
+-- applyLabelToggle went away in the same change, so it tells the two apart.
+local function makeLabelToggleItem(Config, mod_id, label, refresh, _lc)
+    if type(Config.applyLabelToggle) == "function" then
+        return Config.makeLabelToggleItem(mod_id, label, refresh, _lc)
+    end
+    return Config.makeLabelToggleItem(mod_id, refresh, _lc)
 end
 
 -- ---------------------------------------------------------------------------
@@ -543,8 +558,9 @@ end
 -- ---------------------------------------------------------------------------
 local M = {}
 
--- Kept separate from M.label: applyLabelToggle() mutates M.label to nil when
--- the section label is hidden, so it can't also serve as its own default.
+-- Kept separate from M.label: applyLabelToggle() (SimpleUI <= 2.6) mutates
+-- M.label to nil when the section label is hidden, so it can't also serve as
+-- its own default.
 local _DEFAULT_LABEL = _("Currently Reading")
 
 M.id              = "hero_currently"
@@ -737,7 +753,12 @@ function M.build(w, ctx)
     local SH       = getSH()
     if not Config or not Settings or not UI or not SH then return nil end
 
-    Config.applyLabelToggle(M, _DEFAULT_LABEL)
+    local Compat = getSUICompat()
+    if Compat and Compat.applyLabel then
+        Compat.applyLabel(M, _DEFAULT_LABEL)
+    else
+        M.label = _DEFAULT_LABEL
+    end
 
     local pfx      = ctx.pfx or ""
     local excludes = getExcludePaths(pfx)
@@ -815,7 +836,7 @@ function M.build(w, ctx)
         fgcolor   = CLR_TEXT,
         bold      = true,
     }
-    local title_widget = (ctx.has_wallpaper and UI and UI.makeAlphaTextBox(title_args))
+    local title_widget = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(title_args))
                           or TextBoxWidget:new(title_args)
 
     -- Tappable wrapper: tapping the title also opens the book, same as the
@@ -846,7 +867,7 @@ function M.build(w, ctx)
             height_overflow_show_ellipsis = true,
             fgcolor   = CLR_SUB,
         }
-        right_top[#right_top + 1] = (ctx.has_wallpaper and UI and UI.makeAlphaTextBox(author_args))
+        right_top[#right_top + 1] = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(author_args))
                                       or TextBoxWidget:new(author_args)
     end
 
@@ -1015,7 +1036,7 @@ function M.build(w, ctx)
                     line_height = 0.3,
                     fgcolor     = CLR_SUB,
                 }
-                local pwid = (ctx.has_wallpaper and UI and UI.makeAlphaTextBox(desc_args))
+                local pwid = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(desc_args))
                               or TextBoxWidget:new(desc_args)
                 desc_group[#desc_group + 1] = pwid
                 total_h = total_h + pwid:getSize().h
@@ -1263,7 +1284,7 @@ function M.getMenuItems(ctx_menu)
     end
 
     return {
-        Config.makeLabelToggleItem(M.id, M.name, refresh, _),
+        makeLabelToggleItem(Config, M.id, M.name, refresh, _),
         Config.makeScaleItem({
             text_func    = function()
                 local pct = Config.getModuleScalePct("hero_currently", pfx)

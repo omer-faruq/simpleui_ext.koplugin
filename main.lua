@@ -186,6 +186,8 @@ end
 --
 -- There is no way for an external module to opt in: M.needs.books exists, but
 -- it is read further down and only reaches the stats provider, not this gate.
+-- (SimpleUI 3.0 replaced that gate with M.needs.recent / Registry.getRecentDemand,
+-- but current_fp still depends on its own "currently" module alone.)
 -- So a home screen page built out of OUR book modules -- with SimpleUI's own
 -- ones switched off, which is exactly what replacing them means -- hands every
 -- module a ctx with no current book and an empty recent list, and a module
@@ -198,9 +200,28 @@ end
 -- falls back to opening its own connection and closing it, and a connection
 -- opened here would have no owner to close it.
 -- ---------------------------------------------------------------------------
+-- Module id of a layout page entry. SimpleUI 3.0 layouts may still hold
+-- legacy { id = ..., width = ... } tables (normalized to plain ids on the
+-- next Layout Editor load); 2.6 and earlier hold plain id strings only.
+local function _entryId(entry)
+    if type(entry) == "table" then return entry.id end
+    return entry
+end
+
 local function _hydrateCtx(ctx)
     if type(ctx) ~= "table" or ctx._sui_ext_hydrated then return end
     ctx._sui_ext_hydrated = true
+
+    -- SimpleUI 3.0 prefetches recent books whenever ANY enabled module asks
+    -- for them (M.needs.recent: coverdeck, recent, tab_grid, ...), but only
+    -- fills current_fp when its own "currently" module is on. A recent list
+    -- prefetched without a current book starts with the book on top of the
+    -- history -- exactly what current_fp would have been -- so reuse it
+    -- instead of leaving our currently-reading modules empty.
+    if not ctx.current_fp and not ctx._show_c
+       and type(ctx.recent_fps) == "table" and ctx.recent_fps[1] then
+        ctx.current_fp = ctx.recent_fps[1]
+    end
 
     local has_books = ctx.current_fp or (ctx.recent_fps and #ctx.recent_fps > 0)
     if has_books then return end
@@ -894,7 +915,10 @@ function SimpleUIExtPlugin:_placedModuleIds()
         if type(layout) == "table" and type(layout.pages) == "table" then
             ok_any = true
             for _i, page in ipairs(layout.pages) do
-                for _j, id in ipairs(page.modules or {}) do placed[id] = true end
+                for _j, entry in ipairs(page.modules or {}) do
+                    local id = _entryId(entry)
+                    if id then placed[id] = true end
+                end
             end
         end
     end
@@ -917,7 +941,7 @@ end
 -- what to offer (screens/sui_settings_window.lua, buildModulePicker):
 --
 --     for _, mod in ipairs(Registry.list()) do
---         local is_instance = mod.id:match("_row_") ~= nil
+--         local is_instance = mod.id:match("_row_") ~= nil  -- 3.0: Registry.isInstance(mod.id)
 --         if not active_set[mod.id] and not is_instance then  -- offer it
 --
 -- Deliberately called late -- from the Diagnostics screen, and from a delayed
@@ -988,7 +1012,10 @@ function SimpleUIExtPlugin:_addModulesToHomescreen()
 
     local placed = {}
     for _i, page in ipairs(layout.pages) do
-        for _j, id in ipairs(page.modules or {}) do placed[id] = true end
+        for _j, entry in ipairs(page.modules or {}) do
+            local id = _entryId(entry)
+            if id then placed[id] = true end
+        end
     end
     local was_placed = 0
     for _i, id in ipairs(self._mod_ids or {}) do
@@ -1029,8 +1056,8 @@ function SimpleUIExtPlugin:_addModulesToHomescreen()
     local lifted = 0
     for _i, page in ipairs(layout.pages) do
         local kept = {}
-        for _j, id in ipairs(page.modules or {}) do
-            if ours[id] then lifted = lifted + 1 else kept[#kept + 1] = id end
+        for _j, entry in ipairs(page.modules or {}) do
+            if ours[_entryId(entry)] then lifted = lifted + 1 else kept[#kept + 1] = entry end
         end
         page.modules = kept
     end
@@ -1099,7 +1126,10 @@ function SimpleUIExtPlugin:_addModulesToHomescreen()
     -- LayoutService.save() effect 2: the flat order (placed first, then the rest).
     local flat_order = {}
     for _i, page in ipairs(layout.pages) do
-        for _j, id in ipairs(page.modules or {}) do flat_order[#flat_order + 1] = id end
+        for _j, entry in ipairs(page.modules or {}) do
+            local id = _entryId(entry)
+            if id then flat_order[#flat_order + 1] = id end
+        end
     end
     local ok_l, mods = pcall(Registry.list)
     if ok_l and type(mods) == "table" then
@@ -1250,7 +1280,8 @@ function SimpleUIExtPlugin:_engineUpvalue(pred)
     if type(inst) == "table" then
         probes[#probes + 1] = inst._updatePage
         probes[#probes + 1] = inst._buildCtx
-        probes[#probes + 1] = inst._getCtxMenu
+        probes[#probes + 1] = inst._prefetchBooks   -- 3.0 (references Registry)
+        probes[#probes + 1] = inst._getCtxMenu      -- <= 2.6; removed in 3.0
         probes[#probes + 1] = inst._openModuleSettingsFor
         probes[#probes + 1] = inst._showBookHoldDialog
     end
@@ -1374,7 +1405,12 @@ function SimpleUIExtPlugin:_screens()
         local layout = S:readSetting(layout_key)
         if type(layout) == "table" and type(layout.pages) == "table" then
             for _i, page in ipairs(layout.pages) do
-                pages[#pages + 1] = page.modules or {}
+                local ids = {}
+                for _j, entry in ipairs(page.modules or {}) do
+                    local id = _entryId(entry)
+                    if id then ids[#ids + 1] = id end
+                end
+                pages[#pages + 1] = ids
             end
         end
         return pages
@@ -1428,7 +1464,10 @@ function SimpleUIExtPlugin:_probeRegistry()
         local layout = S:readSetting("simpleui_layout")
         if type(layout) == "table" and type(layout.pages) == "table" then
             for _i, page in ipairs(layout.pages) do
-                for _j, id in ipairs(page.modules or {}) do active[id] = true end
+                for _j, entry in ipairs(page.modules or {}) do
+                    local id = _entryId(entry)
+                    if id then active[id] = true end
+                end
             end
         end
     end)
@@ -1436,13 +1475,22 @@ function SimpleUIExtPlugin:_probeRegistry()
     local ours, offered = {}, 0
     for _i, id in ipairs(self._mod_ids or {}) do ours[id] = true end
 
+    -- SimpleUI 3.0's picker asks Registry.isInstance(); <= 2.6 matched "_row_".
+    local function isInstance(id)
+        if type(Registry.isInstance) == "function" then
+            local ok_i, r = pcall(Registry.isInstance, id)
+            if ok_i then return r == true end
+        end
+        return id:match("_row_") ~= nil
+    end
+
     add(("Registry.list() now returns %d module(s)"):format(#mods))
     local seen_idx = {}
     for i, m in ipairs(mods) do
         local id = type(m) == "table" and m.id
         if type(id) == "string" then
             if ours[id] then seen_idx[id] = i end
-            if not active[id] and not id:match("_row_") then offered = offered + 1 end
+            if not active[id] and not isInstance(id) then offered = offered + 1 end
         end
     end
     add(("Add Module would offer %d entr(ies)"):format(offered))
@@ -1450,7 +1498,7 @@ function SimpleUIExtPlugin:_probeRegistry()
     for _i, id in ipairs(self._mod_ids or {}) do
         if seen_idx[id] then
             local why = active[id] and "already placed -- picker hides it"
-                        or (id:match("_row_") and "id contains '_row_' -- picker hides it"
+                        or (isInstance(id) and "treated as an instance -- picker hides it"
                             or "SHOULD BE OFFERED")
             add(("  %s: in list at #%d, %s"):format(id, seen_idx[id], why))
         else
@@ -1576,6 +1624,11 @@ function SimpleUIExtPlugin:_probeRegistry()
         end
         local show_c = en(mc)
         local show_r = en(mr) or en(mcd)
+        -- 3.0: any module may ask for recent books through M.needs.recent.
+        if type(Registry.getRecentDemand) == "function" then
+            local ok_d, demand = pcall(Registry.getRecentDemand, pfx)
+            if ok_d and type(demand) == "number" then show_r = demand > 0 end
+        end
         add(("Engine ctx: currently=%s recent=%s coverdeck=%s -> prefetchBooks %s")
             :format(tostring(en(mc)), tostring(en(mr)), tostring(en(mcd)),
                     (show_c or show_r) and "RUNS (ctx gets books)"
@@ -1657,6 +1710,9 @@ function SimpleUIExtPlugin:_makeProbeCtx(pfx)
         on_goal_tap  = function() end,
         sectionLabel = function() return nil end,
         vspan_pool   = {},
+        -- SimpleUI 3.0 ctx fields modules may read unguarded.
+        landscape_factor = 1,
+        cfg          = {},
         _w           = math.max(200, Screen:getWidth() - 28),
     }
 

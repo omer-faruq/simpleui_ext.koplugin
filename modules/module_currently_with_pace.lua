@@ -41,6 +41,16 @@ local PAD          = UI.PAD
 local LABEL_H      = UI.LABEL_H
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 
+-- SimpleUI 3.0 dropped makeLabelToggleItem's default_label argument: it is
+-- (mod_id, refresh, _lc) there, (mod_id, default_label, refresh, _lc) before.
+-- applyLabelToggle went away in the same change, so it tells the two apart.
+local function makeLabelToggleItem(Config, mod_id, label, refresh, _lc)
+    if type(Config.applyLabelToggle) == "function" then
+        return Config.makeLabelToggleItem(mod_id, label, refresh, _lc)
+    end
+    return Config.makeLabelToggleItem(mod_id, refresh, _lc)
+end
+
 -- Lazy-loaded shared book helpers (cover, progress bar, book data).
 local _SH = nil
 local function getSH()
@@ -494,7 +504,7 @@ end
 -- Builds the module widget: cover on the left, text column on the right.
 -- Elements in the text column are rendered in user-configured order.
 function M.build(w, ctx)
-    Config.applyLabelToggle(M, _("Currently Reading"))
+    SUICompat.applyLabel(M, _("Currently Reading"))
     
     local SH = getSH()
     if not SH then return nil end
@@ -638,7 +648,7 @@ function M.build(w, ctx)
             }
 
             local title_w
-            if ctx.has_wallpaper then
+            if (ctx.text_alpha or ctx.has_wallpaper) then
                 title_w = UI.makeAlphaTextBox(title_args)
             else
                 title_w = TextBoxWidget:new(title_args)
@@ -771,7 +781,7 @@ function M.build(w, ctx)
                         for _i, stat in ipairs(stats_to_render) do
                             gap_before(pct_gap)
                             local stat_widget
-                            if ctx.has_wallpaper then
+                            if (ctx.text_alpha or ctx.has_wallpaper) then
                                 stat_widget = UI.makeAlphaTextBox{
                                     text      = stat.text,
                                     face      = face_s,
@@ -804,7 +814,7 @@ function M.build(w, ctx)
                             local group_text = table.concat(group_parts, " • ")
                             
                             local stats_widget
-                            if ctx.has_wallpaper then
+                            if (ctx.text_alpha or ctx.has_wallpaper) then
                                 stats_widget = UI.makeAlphaTextBox{
                                     text      = group_text,
                                     face      = face_s,
@@ -903,7 +913,7 @@ function M.build(w, ctx)
                     
                     -- Use TextBoxWidget for automatic wrapping when text is too long
                     local stats_widget
-                    if ctx.has_wallpaper then
+                    if (ctx.text_alpha or ctx.has_wallpaper) then
                         stats_widget = UI.makeAlphaTextBox{
                             text      = stats_text,
                             face      = face_s,
@@ -1376,7 +1386,7 @@ function M.getMenuItems(ctx_menu)
         _makeTextScaleItem(ctx_menu),
         thumb,
         gap_item,
-        Config.makeLabelToggleItem("currently_with_pace", _("Currently Reading (with Pace)"), refresh, _),
+        makeLabelToggleItem(Config, "currently_with_pace", _("Currently Reading (with Pace)"), refresh, _),
         {
             text           = _("Items"),
             sub_item_table = items_submenu,

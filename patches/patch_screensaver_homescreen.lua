@@ -190,36 +190,97 @@ function P.apply()
         return
     end
 
-    local PAGE_BREAK_ID = Homescreen.PAGE_BREAK_ID  -- "__page_break__"
+    local PAGE_BREAK_ID = Homescreen.PAGE_BREAK_ID or "__page_break__"
 
     -- Layout constants — prefer sui_core values, fall back to Device-scaled.
+    -- SimpleUI 3.0 turned UI.SIDE_PAD into a function (it was a number up to
+    -- 2.6); using it as a number threw inside every sleep-screen build.
     local ok_ui, UI = pcall(require, "sui_core")
-    local SIDE_PAD = (ok_ui and UI and UI.SIDE_PAD) or Screen:scaleBySize(16)
-    local MOD_GAP  = (ok_ui and UI and UI.MOD_GAP)  or Screen:scaleBySize(8)
+    local function _sidePad()
+        local sp = ok_ui and UI and UI.SIDE_PAD
+        if type(sp) == "function" then
+            local ok, v = pcall(sp)
+            sp = ok and v or nil
+        end
+        return tonumber(sp) or Screen:scaleBySize(16)
+    end
+    local MOD_GAP  = (ok_ui and UI and tonumber(UI.MOD_GAP)) or Screen:scaleBySize(8)
+
+    -- SimpleUI evicts its modules from package.loaded on every FM<->Reader
+    -- switch; the live instance sits under the foldered name since 2.5 (the
+    -- legacy alias entry can be a stale orphan). Fall back to the P.apply()
+    -- capture only when neither is loaded.
+    local function _live(names, fallback)
+        for _i, name in ipairs(names) do
+            local m = package.loaded[name]
+            if type(m) == "table" then return m end
+        end
+        return fallback
+    end
+    local function _liveRegistry()
+        return _live({ "modules/moduleregistry", "desktop_modules/moduleregistry" }, Registry)
+    end
+    local function _liveConfig()
+        return _live({ "infra/sui_config", "sui_config" }, Config)
+    end
+    local function _liveStore()
+        return _live({ "infra/sui_store", "sui_store" }, SUISettings)
+    end
 
     -- ── 3. Helper: build minimal context for module.build() calls ─────────
+    -- Mirrors ScreenWidget:_buildCtx() of the installed SimpleUI: 3.0 asks
+    -- each module what data it needs (M.needs via Registry.wantsData /
+    -- getRecentDemand); 2.6 only knew the fixed currently/recent/coverdeck,
+    -- reading_goals and reading_stats checks, kept below as the fallback.
     local function _buildSleepCtx()
-        -- Re-acquire modules that SimpleUI's onTeardown() may have evicted from
-        -- package.loaded during a context switch (FM<->Reader).  The new plugin
-        -- instance re-requires them before any sleep can occur, so
-        -- package.loaded holds fresh, properly-initialised objects.  Fall back
-        -- to the P.apply() closure captures only on the very first sleep.
-        local live_Registry = package.loaded["desktop_modules/moduleregistry"] or Registry
-        local live_Config   = package.loaded["sui_config"]                     or Config
+        local live_Registry = _liveRegistry()
+        local live_Config   = _liveConfig()
+        local has_needs_api = type(live_Registry.wantsData) == "function"
+        local function wants(need)
+            if not has_needs_api then return false end
+            local ok, v = pcall(live_Registry.wantsData, PFX, need)
+            return ok and v or false
+        end
+        local function enabled(id)
+            local m = live_Registry.get(id)
+            return (m and live_Registry.isEnabled(m, PFX)) and true or false
+        end
+
+        local show_c = enabled("currently")
+        local recent_demand
+        if type(live_Registry.getRecentDemand) == "function" then
+            local ok, n = pcall(live_Registry.getRecentDemand, PFX)
+            recent_demand = ok and tonumber(n) or 0
+        else
+            recent_demand = (enabled("recent") or enabled("coverdeck")) and 5 or 0
+        end
+        local show_r = recent_demand > 0
 
         local bs = { current_fp = nil, recent_fps = {}, prefetched_data = {} }
         local ok_sh, SH = pcall(require, "desktop_modules/module_books_shared")
-        if ok_sh and SH then
-            local mod_c  = live_Registry.get("currently")
-            local mod_r  = live_Registry.get("recent")
-            local mod_cd = live_Registry.get("coverdeck")
-            local show_c = mod_c  and live_Registry.isEnabled(mod_c,  PFX)
-            local show_r = (mod_r  and live_Registry.isEnabled(mod_r,  PFX))
-                        or (mod_cd and live_Registry.isEnabled(mod_cd, PFX))
-            if show_c or show_r then
-                local ok_bs, result = pcall(SH.prefetchBooks, show_c, show_r, 5, false)
-                if ok_bs and result then bs = result end
+        if ok_sh and SH and (show_c or show_r) then
+            local opts = {}
+            if type(SH.isCurrentExcluded) == "function" then
+                local ok_x, ex = pcall(SH.isCurrentExcluded, PFX)
+                if ok_x then opts.exclude_current = ex end
             end
+            local ok_bs, result = pcall(SH.prefetchBooks, show_c, show_r,
+                                        math.max(recent_demand, 1), opts)
+            if ok_bs and type(result) == "table" then bs = result end
+        end
+        bs.recent_fps      = bs.recent_fps or {}
+        bs.prefetched_data = bs.prefetched_data or {}
+
+        local rg_active = enabled("reading_goals")
+        local wants_stats, needs_books
+        if has_needs_api then
+            wants_stats = rg_active or wants("stats")
+            needs_books = rg_active or wants("books")
+        else
+            local mod_rs = live_Registry.get("reading_stats")
+            local rs_on  = mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX)
+            wants_stats  = rg_active or rs_on
+            needs_books  = false
         end
 
         local db_conn = nil
@@ -228,48 +289,63 @@ function P.apply()
             if ok_db then db_conn = conn end
         end
 
+        local year_str   = os.date("%Y")
         local stats_data = nil
-        local mod_rg = live_Registry.get("reading_goals")
-        local mod_rs = live_Registry.get("reading_stats")
-        local wants_stats = (mod_rg and live_Registry.isEnabled(mod_rg, PFX))
-                         or (mod_rs and mod_rs.isEnabled and mod_rs.isEnabled(PFX))
-        if wants_stats and db_conn then
-            local ok_sp, SP = pcall(require, "desktop_modules/module_stats_provider")
-            if ok_sp and SP and SP.get then
-                local ok_s, sd = pcall(SP.get, db_conn, os.date("%Y"), false)
-                if ok_s then stats_data = sd end
-            end
+        local status_counts, session_records, year_data, stat_charts
+        local ok_sp, SP = pcall(require, "desktop_modules/module_stats_provider")
+        if not (ok_sp and type(SP) == "table") then SP = nil end
+        if SP and wants_stats and db_conn and SP.get then
+            local ok_s, sd = pcall(SP.get, db_conn, year_str, needs_books)
+            if ok_s then stats_data = sd end
+        end
+        local function spCall(fn_name, ...)
+            if not (SP and type(SP[fn_name]) == "function") then return nil end
+            local ok, v = pcall(SP[fn_name], ...)
+            return ok and v or nil
+        end
+        if wants("status")  then status_counts   = spCall("getStatusCounts") end
+        if db_conn then
+            if wants("records") then session_records = spCall("getSessionRecords", db_conn) end
+            if wants("year")    then year_data       = spCall("getYearData", db_conn)       end
+            if wants("charts")  then stat_charts     = spCall("getChartData", db_conn)      end
         end
 
-        local mod_c  = live_Registry.get("currently")
-        local mod_r  = live_Registry.get("recent")
-        local mod_cd = live_Registry.get("coverdeck")
-        local show_c = mod_c  and live_Registry.isEnabled(mod_c,  PFX)
-        local show_r = (mod_r  and live_Registry.isEnabled(mod_r,  PFX))
-                    or (mod_cd and live_Registry.isEnabled(mod_cd, PFX))
-
         return {
-            pfx          = PFX,
-            pfx_qa       = "simpleui_qa_",
-            close_fn     = function() end,
-            open_fn      = function() end,
-            on_qa_tap    = function() end,
-            on_goal_tap  = function() end,
-            db_conn      = db_conn,
-            stats        = stats_data,
-            vspan_pool   = {},
-            prefetched   = bs.prefetched_data,
-            current_fp   = bs.current_fp,
-            recent_fps   = bs.recent_fps,
-            sectionLabel = function() return nil end,
-            _hs_widget   = nil,
-            _show_c      = show_c,
-            _show_r      = show_r,
-            _has_content = (bs.current_fp and show_c)
-                        or (bs.recent_fps and #bs.recent_fps > 0 and show_r)
-                        or false,
-            has_wallpaper = false,
-            cfg           = nil,
+            _needs_books     = needs_books,
+            year_str         = year_str,
+            landscape_factor = 1,   -- the sleep screen is always portrait
+            pfx              = PFX,
+            pfx_qa           = "simpleui_qa_",
+            close_fn         = function() end,
+            open_fn          = function() end,
+            hold_fn          = function() end,
+            refresh_fn       = function() end,
+            dirty_region_fn  = function() end,
+            open_settings_fn = function() end,
+            on_qa_tap        = function() end,
+            on_goal_tap      = function() end,
+            db_conn          = db_conn,
+            db_conn_fatal    = false,
+            stats            = stats_data,
+            stats_stale      = false,
+            status_counts    = status_counts,
+            session_records  = session_records,
+            year_data        = year_data,
+            stat_charts      = stat_charts,
+            vspan_pool       = {},
+            prefetched       = bs.prefetched_data,
+            current_fp       = bs.current_fp,
+            recent_fps       = bs.recent_fps,
+            sectionLabel     = function() return nil end,
+            _hs_widget       = nil,
+            _show_c          = show_c,
+            _show_r          = show_r,
+            _has_content     = (bs.current_fp and show_c)
+                            or (#bs.recent_fps > 0 and show_r)
+                            or false,
+            has_wallpaper    = false,
+            cfg              = nil,  -- modules read their settings live
+            palette          = {},   -- ModuleChrome.NO_PALETTE
         }, db_conn
     end
 
@@ -334,9 +410,10 @@ function P.apply()
         -- Re-acquire modules fresh after a context switch (SimpleUI's
         -- onTeardown() clears package.loaded for all SimpleUI modules; the
         -- new plugin instance re-populates them before the next sleep).
-        local live_Registry   = package.loaded["desktop_modules/moduleregistry"] or Registry
-        local live_SUISettings = package.loaded["sui_store"]                     or SUISettings
-        local live_Config     = package.loaded["sui_config"]                     or Config
+        local live_Registry    = _liveRegistry()
+        local live_SUISettings = _liveStore()
+        local live_Config      = _liveConfig()
+        local SIDE_PAD         = _sidePad()
 
         -- Determine which modules are on the requested page.
         -- Mirrors sui_homescreen._updatePage: prefer the new simpleui_layout
@@ -348,8 +425,11 @@ function P.apply()
             for _i, page in ipairs(layout.pages) do
                 local page_ids = {}
                 if type(page.modules) == "table" then
-                    for _i, mod_id in ipairs(page.modules) do
-                        page_ids[#page_ids + 1] = mod_id
+                    for _i, entry in ipairs(page.modules) do
+                        -- SimpleUI 3.0 may still hold legacy { id, width }
+                        -- entries until its layout loader normalises them.
+                        local mod_id = type(entry) == "table" and entry.id or entry
+                        if mod_id then page_ids[#page_ids + 1] = mod_id end
                     end
                 end
                 pages_of_ids[#pages_of_ids + 1] = page_ids
@@ -415,6 +495,12 @@ function P.apply()
         local body  = VerticalGroup:new{ align = "left" }
         local first = true
         for _i, mod in ipairs(mods) do
+            -- Per-module fields SimpleUI 3.0's engine sets before each build
+            -- (see ScreenWidget:_buildModWidget); no module chrome here.
+            ctx.col_w      = inner_w
+            ctx.grow_h     = nil
+            ctx.text_alpha = has_wp
+            ctx.ink        = nil
             local ok_w, widget = pcall(mod.build, inner_w, ctx)
             if ok_w and widget then
                 if first then
@@ -461,13 +547,19 @@ function P.apply()
         if wp_widget then
             local _orig_paintTo = content.paintTo
             local _bg           = wp_widget
-            local _opacity      = live_SUISettings:readSetting(
-                                    "simpleui_style_wallpaper_opacity", 0) or 0
+            local _opacity      = tonumber(live_SUISettings:readSetting(
+                                    "simpleui_style_wallpaper_opacity", 0)) or 0
+            -- SimpleUI 3.0 adds a darken tint next to the lighten one and
+            -- applies both through WP.paintTint.
+            local _WP           = SUICompat.wallpaperAPI()
+            local _paintTint    = _WP and type(_WP.paintTint) == "function" and _WP.paintTint
             function content:paintTo(bb, x, y)
                 -- Paint wallpaper anchored at the top of the screen.
                 _bg:paintTo(bb, x, 0)
-                -- Optional white-fade on top (0 = fully opaque, 1-99 = fade).
-                if _opacity > 0 then
+                if _paintTint then
+                    pcall(_paintTint, bb, x, 0, screen_w, screen_h)
+                elseif _opacity > 0 then
+                    -- Optional white-fade on top (0 = fully opaque, 1-99 = fade).
                     bb:lightenRect(x, 0, screen_w, screen_h, _opacity / 100)
                 end
                 _orig_paintTo(self, bb, x, y)

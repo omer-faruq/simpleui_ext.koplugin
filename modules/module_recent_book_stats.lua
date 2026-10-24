@@ -81,11 +81,16 @@ end
 
 -- Theme colours go through the compat layer, never sui_style directly:
 -- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
-local function themeColor(role)
+local function getCompat()
     if not _SUICompat then
         local ok, m = pcall(require, "utils/sui_compat")
         if ok and m then _SUICompat = m end
     end
+    return _SUICompat
+end
+
+local function themeColor(role)
+    getCompat()
     if not (_SUICompat and _SUICompat.themeColor) then return nil end
     return _SUICompat.themeColor(role)
 end
@@ -570,8 +575,9 @@ end
 
 local M = {}
 
--- Kept separate from M.label: applyLabelToggle() mutates M.label to nil when
--- the section label is hidden, so it can't also serve as its own default.
+-- Kept separate from M.label: on SimpleUI <= 2.6 applyLabelToggle() mutates
+-- M.label to nil when the section label is hidden, so it can't also serve as
+-- its own default. See SUICompat.applyLabel.
 local _DEFAULT_LABEL = _("Recent Book Stats")
 
 M.id              = "recent_book_stats"
@@ -607,7 +613,12 @@ function M.build(w, ctx)
     local UI     = getUI()
     if not Config or not UI then return nil end
 
-    Config.applyLabelToggle(M, _DEFAULT_LABEL)
+    -- SimpleUI 3.0 removed Config.applyLabelToggle; calling it threw here
+    -- and the engine dropped the whole module. See SUICompat.applyLabel.
+    getCompat()
+    if _SUICompat and _SUICompat.applyLabel then
+        _SUICompat.applyLabel(M, _DEFAULT_LABEL)
+    end
 
     local pfx   = ctx and ctx.pfx or ""
     local scale = Config.getModuleScale("recent_book_stats", pfx)
@@ -656,8 +667,12 @@ function M.build(w, ctx)
     -- Wallpaper transparency helper: replaces TextBoxWidget:new when a
     -- wallpaper is active so labels don't paint a white box over the image.
     local has_wp = ctx and ctx.has_wallpaper
+    -- SimpleUI 3.0 can also fill the module's own box (Appearance >
+    -- Background); ctx.text_alpha covers both, so the opaque white
+    -- TextBoxWidget background never paints over the fill.
+    local text_alpha = ctx and (ctx.text_alpha or ctx.has_wallpaper)
     local function make_tbw(args)
-        if has_wp and UI and UI.makeAlphaTextBox then
+        if text_alpha and UI and UI.makeAlphaTextBox then
             return UI.makeAlphaTextBox(args)
         end
         return TextBoxWidget:new(args)
@@ -835,6 +850,19 @@ end
 -- M.getMenuItems(ctx_menu) → table  (settings in the Arrange / module screen)
 -- ---------------------------------------------------------------------------
 
+-- "Show section label" menu item. SimpleUI 3.0 dropped the unused
+-- default_label parameter: makeLabelToggleItem(mod_id, refresh, _lc), down
+-- from (mod_id, default_label, refresh, _lc) on <= 2.6. Passing the old
+-- argument list to 3.0 made the menu call refresh() as the translator and,
+-- on tap, try to call the module name -- "attempt to call a string value".
+local function makeLabelToggleItem(Config, mod_id, refresh)
+    local info = debug.getinfo(Config.makeLabelToggleItem, "u")
+    if info and info.nparams and info.nparams >= 4 then
+        return Config.makeLabelToggleItem(mod_id, nil, refresh, _)
+    end
+    return Config.makeLabelToggleItem(mod_id, refresh, _)
+end
+
 function M.getMenuItems(ctx_menu)
     local Config = getConfig()
     if not Config then return nil end
@@ -845,7 +873,7 @@ function M.getMenuItems(ctx_menu)
 
     return {
         -- 1. Label visibility toggle
-        Config.makeLabelToggleItem(M.id, M.name, refresh, _),
+        makeLabelToggleItem(Config, M.id, refresh),
 
         -- 2. Scale slider
         Config.makeScaleItem({

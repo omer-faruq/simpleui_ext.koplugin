@@ -138,7 +138,25 @@ function P.apply()
         return
     end
     local ok_ui, UI = pcall(require, "sui_core")
-    local SIDE_PAD  = (ok_ui and UI and UI.SIDE_PAD) or Screen:scaleBySize(16)
+    -- SimpleUI 3.0 turned UI.SIDE_PAD into a function (a number up to 2.6);
+    -- resolved per sleep since its value is cached per screen size.
+    local function _sidePad()
+        local sp = ok_ui and UI and UI.SIDE_PAD
+        if type(sp) == "function" then
+            local ok, v = pcall(sp)
+            sp = ok and v or nil
+        end
+        return tonumber(sp) or Screen:scaleBySize(16)
+    end
+
+    -- SimpleUI 3.0 dropped the "calendar" glyph from SUIStyle.ICON;
+    -- SUIStyle.icon() then returns "" and the row lost its icon.
+    local _ICON_FALLBACK = { calendar = "\u{F490}" }
+    local function icon(name)
+        local g = SUIStyle.icon(name)
+        if (g == nil or g == "") and _ICON_FALLBACK[name] then return _ICON_FALLBACK[name] end
+        return g or ""
+    end
 
     local CLR_BLACK  = Blitbuffer.COLOR_BLACK
     local CLR_BORDER = Blitbuffer.gray(0.72)
@@ -292,7 +310,21 @@ function P.apply()
 
     local function getAllTimeStats()
         local r = { hours = 0, pages = 0, book_count = 0 }
+        local ok_sp, SP = pcall(require, "desktop_modules/module_stats_provider")
+        if not (ok_sp and type(SP) == "table") then SP = nil end
+        local got_books = false
         _withStatsDb(nil, function(conn)
+            -- Books finished: SP.get() caches its result for the day, so it
+            -- must get a real connection -- with nil it would cache zeroed
+            -- time-series stats and blank the home screen's stat modules
+            -- until the next invalidation.
+            if SP and SP.get then
+                local ok_s, s = pcall(SP.get, conn, os.date("%Y"), true)
+                if ok_s and type(s) == "table" then
+                    r.book_count = s.books_total or 0
+                    got_books = true
+                end
+            end
             _withStmt(conn, [[
                 SELECT COUNT(*) FROM (SELECT 1 FROM page_stat GROUP BY id_book,page)
             ]], function(stmt)
@@ -309,10 +341,14 @@ function P.apply()
                 end
             end)
         end)
-        local ok_sp, SP = pcall(require, "desktop_modules/module_stats_provider")
-        if ok_sp and SP and SP.get then
-            local s = SP.get(nil, os.date("%Y"), true)
-            r.book_count = s and s.books_total or 0
+        -- No stats DB: count straight from SimpleUI 3.0's finished-books
+        -- ledger, which needs no DB and caches nothing.
+        if not got_books and SP and SP.getFinishedBooks and SP.countFinished then
+            local ok_b, books = pcall(SP.getFinishedBooks)
+            if ok_b and type(books) == "table" then
+                local ok_c, n = pcall(SP.countFinished, books)
+                if ok_c then r.book_count = tonumber(n) or 0 end
+            end
         end
         return r
     end
@@ -590,11 +626,11 @@ function P.apply()
             bordersize=SUIStyle.BORDER_SZ, color=CLR_BORDER,
             radius=Screen:scaleBySize(12), padding=0, margin=0,
             HG:new{
-                mkCell(SUIStyle.icon("clock"), fmtCount(alltime.hours),      _("hours read")),
+                mkCell(icon("clock"), fmtCount(alltime.hours),      _("hours read")),
                 mkSep(),
-                mkCell(SUIStyle.icon("page"),  fmtCount(alltime.pages),      _("pages read")),
+                mkCell(icon("page"),  fmtCount(alltime.pages),      _("pages read")),
                 mkSep(),
-                mkCell(SUIStyle.icon("book"),  fmtCount(alltime.book_count), _("books finished")),
+                mkCell(icon("book"),  fmtCount(alltime.book_count), _("books finished")),
             },
         }
     end
@@ -727,12 +763,12 @@ function P.apply()
                     and (string.format("%s – %s", fmtDate(sw.best_start), fmtDate(sw.best_end))) or nil
 
                 local streak_row  = iconBlock(inner_w, {
-                    iconRow(inner_w, SUIStyle.icon("calendar"), _("Current streak"), cur_d),
-                    iconRow(inner_w, SUIStyle.icon("trophy"),   _("Best streak"),    best_d, best_d_sub),
+                    iconRow(inner_w, icon("calendar"), _("Current streak"), cur_d),
+                    iconRow(inner_w, icon("trophy"),   _("Best streak"),    best_d, best_d_sub),
                 })
                 local wstreak_row = iconBlock(inner_w, {
-                    iconRow(inner_w, SUIStyle.icon("calendar"), _("Current streak"), cur_w),
-                    iconRow(inner_w, SUIStyle.icon("trophy"),   _("Best streak"),    best_w, best_w_sub),
+                    iconRow(inner_w, icon("calendar"), _("Current streak"), cur_w),
+                    iconRow(inner_w, icon("trophy"),   _("Best streak"),    best_w, best_w_sub),
                 })
 
                 return VG:new{ align="left",
@@ -740,9 +776,9 @@ function P.apply()
                     secLabel(_("TODAY'S SUMMARY")),
                     VS:new{width=Screen:scaleBySize(8)},
                     HG:new{ align="center",
-                        mkCard(SUIStyle.icon("clock"), time_str,  _("reading time")),
+                        mkCard(icon("clock"), time_str,  _("reading time")),
                         HS:new{width=today_gap},
-                        mkCard(SUIStyle.icon("page"),  pages_str, _("pages read")),
+                        mkCard(icon("page"),  pages_str, _("pages read")),
                     },
                     VS:new{width=gap},
                     secLabel(_("DAY STREAK")),
@@ -773,22 +809,22 @@ function P.apply()
                     secLabel(_("LAST 7 DAYS")),
                     VS:new{width=Screen:scaleBySize(8)},
                     iconBlock(inner_w, {
-                        iconRow(inner_w, SUIStyle.icon("clock"), _("Average per day"), avg_t),
-                        iconRow(inner_w, SUIStyle.icon("page"),  _("Pages per day"),   avg_p),
+                        iconRow(inner_w, icon("clock"), _("Average per day"), avg_t),
+                        iconRow(inner_w, icon("page"),  _("Pages per day"),   avg_p),
                     }),
                     VS:new{width=gap},
                     secLabel(_("THIS WEEK")),
                     VS:new{width=Screen:scaleBySize(8)},
                     iconBlock(inner_w, {
-                        iconRow(inner_w, SUIStyle.icon("clock"), _("Total time"),  wtm),
-                        iconRow(inner_w, SUIStyle.icon("page"),  _("Pages read"),  wtp),
+                        iconRow(inner_w, icon("clock"), _("Total time"),  wtm),
+                        iconRow(inner_w, icon("page"),  _("Pages read"),  wtp),
                     }),
                     VS:new{width=gap},
                     secLabel(_("THIS MONTH")),
                     VS:new{width=Screen:scaleBySize(8)},
                     iconBlock(inner_w, {
-                        iconRow(inner_w, SUIStyle.icon("clock"), _("Total time"),  mtm),
-                        iconRow(inner_w, SUIStyle.icon("page"),  _("Pages read"),  mtp),
+                        iconRow(inner_w, icon("clock"), _("Total time"),  mtm),
+                        iconRow(inner_w, icon("page"),  _("Pages read"),  mtp),
                     }),
                 }
 
@@ -864,6 +900,7 @@ function P.apply()
         end
 
         local wp   = getBgWidget(screen_w, screen_h)
+        local SIDE_PAD = _sidePad()
         local iw   = screen_w - SIDE_PAD * 2
 
         local ok_pg, vg = pcall(buildPage, page_num, iw, screen_h)
@@ -883,11 +920,18 @@ function P.apply()
             local orig_pt = content.paintTo
             local _bg     = wp
             local ok_st, SUIStore = pcall(require, "sui_store")
-            local opacity = (ok_st and SUIStore
+            local opacity = tonumber(ok_st and SUIStore
                 and SUIStore:readSetting("simpleui_style_wallpaper_opacity", 0)) or 0
+            -- SimpleUI 3.0 adds a darken tint; WP.paintTint applies both.
+            local WP = SUICompat.wallpaperAPI()
+            local paintTint = WP and type(WP.paintTint) == "function" and WP.paintTint
             function content:paintTo(bb, x, y)
                 _bg:paintTo(bb, x, 0)
-                if opacity > 0 then bb:lightenRect(x, 0, screen_w, screen_h, opacity/100) end
+                if paintTint then
+                    pcall(paintTint, bb, x, 0, screen_w, screen_h)
+                elseif opacity > 0 then
+                    bb:lightenRect(x, 0, screen_w, screen_h, opacity/100)
+                end
                 orig_pt(self, bb, x, y)
             end
         end

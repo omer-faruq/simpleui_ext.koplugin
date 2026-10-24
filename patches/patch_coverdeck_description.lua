@@ -346,7 +346,7 @@ end
 --   strip_h      number          — the actual rendered height (pixels)
 -- ---------------------------------------------------------------------------
 
-local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp)
+local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp, ink)
     scale     = scale     or 1.0
     lbl_scale = lbl_scale or 1.0
 
@@ -362,12 +362,18 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
     local PAD = ok_ui and UI and UI.PAD or Screen:scaleBySize(8)
 
     -- Same fg color as the coverdeck title (CLR_TEXT_EFF in module_coverdeck).
-    -- Resolved through the compat layer: this code runs INSIDE SimpleUI's own
-    -- module_coverdeck build, so calling a sui_style function that 2.6 removed
-    -- would throw and take the built-in coverdeck down with the description.
-    local ok_cp, SUICompat = pcall(require, "utils/sui_compat")
-    local CLR_TEXT = (ok_cp and SUICompat and SUICompat.themeColor("fg"))
-                  or Blitbuffer.COLOR_BLACK
+    -- SimpleUI 3.0 paints module text with ctx.ink.blk, which follows a tinted
+    -- module fill; a fixed black would vanish on a dark fill.
+    -- Older versions: resolved through the compat layer, because this code
+    -- runs INSIDE SimpleUI's own module_coverdeck build, so calling a sui_style
+    -- function that 2.6 removed would throw and take the built-in coverdeck
+    -- down with the description.
+    local CLR_TEXT = ink and ink.blk
+    if not CLR_TEXT then
+        local ok_cp, SUICompat = pcall(require, "utils/sui_compat")
+        CLR_TEXT = (ok_cp and SUICompat and SUICompat.themeColor("fg"))
+                or Blitbuffer.COLOR_BLACK
+    end
 
     -- Font size: user base (pt) scaled by the same module + label scale that
     -- module_coverdeck applies to its own title / stats text.
@@ -404,12 +410,16 @@ local function _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale,
     -- the framebuffer — identical to the technique used by module_hero_currently.
     -- TextBoxWidget:new fills its own internal blitbuffer with white before
     -- drawing text; makeAlphaTextBox bypasses that fill entirely.
+    -- TextBoxWidget has no "justify" alignment: it takes `justified` on top
+    -- of a left alignment.
+    local justified = align == "justify"
     local desc_opts = {
         text                          = strip_text,
         face                          = face,
         width                         = desc_w,
         height                        = line_h * max_lines,
-        alignment                     = align,
+        alignment                     = justified and "left" or align,
+        justified                     = justified,
         fgcolor                       = CLR_TEXT,
         line_height                   = 0.3,
         height_overflow_show_ellipsis = true,
@@ -529,7 +539,13 @@ function P.apply()
         -- favorites / collection) and the "show finished" filter are honoured.
         local fp = _getCenterFp(carousel, ctx)
 
-        local full_desc = fp and _getDescription(fp)
+        -- No centre book: the deck is empty. SimpleUI 3.0 then returns a
+        -- "no books" placeholder already sized to M.getHeight() -- which is
+        -- the wrapper above, strip included -- so there is nothing to add
+        -- (and its [1] is a text box, not the carousel's VerticalGroup).
+        if not fp then return carousel end
+
+        local full_desc = _getDescription(fp)
         local limit_mode = _getLimitMode(pfx, S)
         
         -- In fixed_lines mode, always add placeholder even without description to keep layout stable
@@ -559,7 +575,7 @@ function P.apply()
         -- Build the description strip (or empty placeholder in fixed_lines mode)
         local dtap, _strip_h
         if full_desc then
-            dtap, _strip_h = _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp)
+            dtap, _strip_h = _buildDescStrip(w, pfx, full_desc, bd_title, bd_author, S, scale, lbl_scale, fp, ctx.ink)
         else
             -- Create empty placeholder with fixed height in fixed_lines mode
             local Device = require("device")

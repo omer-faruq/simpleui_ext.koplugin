@@ -69,6 +69,34 @@ local function _isExcluded(fp, excludes)
     return false
 end
 
+-- SimpleUI 3.0 keys a book known to a virtual library (Kobo plugin) by its
+-- virtual path in ctx.current_fp / ctx.recent_fps (SH.prefetchBooks). Paths
+-- taken straight from ReadHistory must be mapped the same way, or they never
+-- match ctx.current_fp and cannot be opened through the provider. Identity
+-- on SimpleUI <= 2.6, which has no such module.
+local function _toVirtual(fp)
+    local ok, VP = pcall(require, "infra/sui_virtual_paths")
+    if ok and type(VP) == "table" and type(VP.toVirtual) == "function" then
+        local ok2, vfp = pcall(VP.toVirtual, fp)
+        if ok2 and vfp then return vfp end
+    end
+    return fp
+end
+
+-- module_coverdeck only drops finished books it finds in ctx.prefetched (the
+-- first few recent books). Books refilled from deeper in the history have no
+-- prefetched record, so it would show them even with "Show finished books"
+-- off. SH.isFinished falls back to the cached sidecar; nil when unavailable.
+local function _finishedChecker(ctx, pfx, S)
+    if S and S:readSetting(pfx .. "coverdeck_show_finished") == true then return nil end
+    local ok, SH = pcall(require, "desktop_modules/module_books_shared")
+    if not (ok and type(SH) == "table" and type(SH.isFinished) == "function") then return nil end
+    return function(fp)
+        local ok2, done = pcall(SH.isFinished, fp, ctx.prefetched)
+        return ok2 and done == true
+    end
+end
+
 -- ---------------------------------------------------------------------------
 -- apply()
 -- ---------------------------------------------------------------------------
@@ -131,14 +159,19 @@ function P.apply()
                         pcall(function() RH:reload() end)
                     end
                     if RH.hist then
+                        local ok_s, S = pcall(require, "sui_store")
+                        local isFinished = _finishedChecker(ctx, pfx, ok_s and S or nil)
                         local filled = {}
                         for _i, e in ipairs(RH.hist) do
                             if e and e.file
                                 and (not ok_lfs or lfs.attributes(e.file, "mode") == "file")
                                 and not _isExcluded(e.file, excludes)
                             then
-                                filled[#filled + 1] = e.file
-                                if #filled >= MAX_DECK then break end
+                                local fp = _toVirtual(e.file)
+                                if not (isFinished and isFinished(fp)) then
+                                    filled[#filled + 1] = fp
+                                    if #filled >= MAX_DECK then break end
+                                end
                             end
                         end
                         ctx.recent_fps = filled

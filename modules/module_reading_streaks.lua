@@ -383,8 +383,9 @@ local function buildStreaksWidget(w, ctx, data)
     return card
 end
 
--- Kept separate from module.label: applyLabelToggle() mutates module.label to
--- nil when the section label is hidden, so it can't also serve as its own default.
+-- Kept separate from module.label: on SimpleUI <= 2.6 applyLabelToggle()
+-- mutates module.label to nil when the section label is hidden, so it can't
+-- also serve as its own default. See SUICompat.applyLabel.
 local _DEFAULT_LABEL = _("Reading Streaks")
 
 local module = {
@@ -401,9 +402,11 @@ local module = {
 }
 
 function module.build(w, ctx)
-    local ok_config, Config = pcall(require, "sui_config")
-    if ok_config and Config then
-        Config.applyLabelToggle(module, _DEFAULT_LABEL)
+    -- SimpleUI 3.0 removed Config.applyLabelToggle; calling it threw here
+    -- and the engine dropped the whole module. See SUICompat.applyLabel.
+    local ok_compat, SUICompat = pcall(require, "utils/sui_compat")
+    if ok_compat and SUICompat and SUICompat.applyLabel then
+        SUICompat.applyLabel(module, _DEFAULT_LABEL)
     end
     
     local ok, streaks = pcall(getStreaksData)
@@ -418,6 +421,19 @@ function module.invalidateCache()
     clearStreaksCache()
 end
 
+-- "Show section label" menu item. SimpleUI 3.0 dropped the unused
+-- default_label parameter: makeLabelToggleItem(mod_id, refresh, _lc), down
+-- from (mod_id, default_label, refresh, _lc) on <= 2.6. Passing the old
+-- argument list to 3.0 made the menu call refresh() as the translator and,
+-- on tap, try to call the module name -- "attempt to call a string value".
+local function makeLabelToggleItem(Config, mod_id, refresh)
+    local info = debug.getinfo(Config.makeLabelToggleItem, "u")
+    if info and info.nparams and info.nparams >= 4 then
+        return Config.makeLabelToggleItem(mod_id, nil, refresh, _)
+    end
+    return Config.makeLabelToggleItem(mod_id, refresh, _)
+end
+
 function module.getMenuItems(ctx_menu)
     local ok, Config = pcall(require, "sui_config")
     if not ok or not Config then return nil end
@@ -426,7 +442,7 @@ function module.getMenuItems(ctx_menu)
     local refresh = ctx_menu.refresh
 
     return {
-        Config.makeLabelToggleItem(module.id, module.name, refresh, _),
+        makeLabelToggleItem(Config, module.id, refresh),
         Config.makeScaleItem({
             text_func = function()
                 local pct = Config.getModuleScalePct("reading_streaks", pfx)
