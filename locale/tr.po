@@ -1467,3 +1467,27 @@ msgstr "—g kaldı"
 msgid "—wpm"
 msgstr "—sf/dk"
 
+
+msgid "Headers"
+msgstr "Başlıklar"
+
+msgid "Values"
+msgstr "Değerler"
+
+msgid "Labels"
+msgstr "Etiketler"
+
+msgid "Percentage"
+msgstr "Yüzde"
+
+msgid "Statistics"
+msgstr "İstatistikler"
+
+msgid "Sections"
+msgstr "Bölümler"
+
+msgid "This Book"
+msgstr "Bu Kitap"
+
+msgid "Pace"
+msgstr "Tempo"

@@ -1467,3 +1467,27 @@ msgstr "—d restante"
 msgid "—wpm"
 msgstr "—pág/min"
 
+
+msgid "Headers"
+msgstr "Encabezados"
+
+msgid "Values"
+msgstr "Valores"
+
+msgid "Labels"
+msgstr "Etiquetas"
+
+msgid "Percentage"
+msgstr "Porcentaje"
+
+msgid "Statistics"
+msgstr "Estadísticas"
+
+msgid "Sections"
+msgstr "Secciones"
+
+msgid "This Book"
+msgstr "Este libro"
+
+msgid "Pace"
+msgstr "Ritmo"

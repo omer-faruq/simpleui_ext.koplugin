@@ -37,6 +37,7 @@ local SUISettings = require("sui_store")
 -- Theme colours go through the compat layer, never sui_style directly:
 -- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
 local SUICompat    = require("utils/sui_compat")
+local Text         = require("utils/sui_ext_text")
 local PAD          = UI.PAD
 local LABEL_H      = UI.LABEL_H
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
@@ -155,7 +156,7 @@ local _bstats_cache = {}
 -- Builds a progress bar with an inline percentage label: [▓▓▓░░░░] XX%
 -- Spacing below the bar is handled by gap_before() on the next element,
 -- consistent with how every other element in the layout works.
-local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inline, fg_color)
+local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inline, fg_color, inline_bold)
     local PCT_W   = math.max(16, math.floor(_BASE_PCT_W       * scale * lbl_scale))
     local GAP     = math.max(2,  math.floor(_BASE_BAR_PCT_GAP * scale))
     local bar_w   = math.max(10, w - GAP - PCT_W)
@@ -183,7 +184,7 @@ local function buildProgressBarWithPct(w, pct, bar_h, scale, lbl_scale, face_inl
         UI.makeColoredText{
             text    = pct_str,
             face    = _face,
-            bold    = true,
+            bold    = inline_bold ~= false,
             fgcolor = _fg,
             width   = PCT_W,
         },
@@ -362,6 +363,14 @@ M.default_on      = false
 M.has_covers      = true   -- activates e-ink dithering and cover poll
 M.is_book_mod     = true   -- suppresses empty-state when active
 M.needs           = { db = true, books = true }  -- Declare DB need for stats queries
+
+-- Text elements with a user-selectable font, style and size (SimpleUI 3.0+).
+-- "percent" also covers the percentage drawn beside the progress bar.
+local TEXT_ELEMS = { "title", "author", "percent", "stats" }
+M.text_elems     = TEXT_ELEMS
+Text.declare(M.id, { title = "bold", percent = "bold" })
+
+local function legacyFace(fs) return Font:getFace("smallinfofont", fs) end
 
 
 -- ---------------------------------------------------------------------------
@@ -551,17 +560,20 @@ function M.build(w, ctx)
     local pct_gap        = math.max(1, math.floor(_BASE_PCT_GAP        * scale))
     local bar_h          = math.max(1, math.floor(_BASE_BAR_H          * scale))
 
-    -- Scale font sizes (layout scale × text scale).
-    local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale * lbl_scale))
-    local author_fs  = math.max(8, math.floor(_BASE_AUTHOR_FS  * scale * lbl_scale))
-    local pct_fs     = math.max(8, math.floor(_BASE_PCT_FS     * scale * lbl_scale))
-    local stats_fs   = math.max(7, math.floor(_BASE_STATS_FS   * scale * lbl_scale))
+    -- Scale font sizes (layout scale × text scale × per-element size).
+    local styles = Text.styles(ctx, M.id, TEXT_ELEMS)
+    local function ts(elem) return Text.scale(styles, elem) end
+    local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale * lbl_scale * ts("title")))
+    local author_fs  = math.max(8, math.floor(_BASE_AUTHOR_FS  * scale * lbl_scale * ts("author")))
+    local pct_fs     = math.max(8, math.floor(_BASE_PCT_FS     * scale * lbl_scale * ts("percent")))
+    local stats_fs   = math.max(7, math.floor(_BASE_STATS_FS   * scale * lbl_scale * ts("stats")))
 
     -- Resolve font faces once so they are not re-created per element.
-    local face_title  = Font:getFace("smallinfofont", title_fs)
-    local face_author = Font:getFace("smallinfofont", author_fs)
-    local face_pct    = Font:getFace("smallinfofont", pct_fs)
-    local face_s      = Font:getFace("smallinfofont", stats_fs)
+    -- Each follows the user's Font / Style; the flags say whether to embolden.
+    local face_title,  title_bold  = Text.face(styles, M.id, "title",   title_fs,  legacyFace, true)
+    local face_author, author_bold = Text.face(styles, M.id, "author",  author_fs, legacyFace, false)
+    local face_pct,    pct_bold    = Text.face(styles, M.id, "percent", pct_fs,    legacyFace, true)
+    local face_s,      stats_bold  = Text.face(styles, M.id, "stats",   stats_fs,  legacyFace, false)
 
     -- Use prefetched book data. After onCloseDocument, _cached_books_state is
     -- cleared and prefetchBooks() re-reads the sidecar, so this is always fresh.
@@ -614,8 +626,8 @@ function M.build(w, ctx)
     local CLR_PH_EFF       = _theme_secondary or _theme_fg or CLR_PLACEHOLDER
 
     -- Pre-resolve the inline-pct font face once for buildProgressBarWithPct.
-    local face_inlinepct = Font:getFace("smallinfofont",
-        math.max(7, math.floor(_BASE_INLINEPCT_FS * scale * lbl_scale)))
+    local face_inlinepct = Text.face(styles, M.id, "percent",
+        math.max(7, math.floor(_BASE_INLINEPCT_FS * scale * lbl_scale * ts("percent"))), legacyFace, true)
 
     -- Flags to ensure stats are rendered only once per mode
     local _compact_stats_rendered = false
@@ -641,7 +653,7 @@ function M.build(w, ctx)
             local title_args = {
                 text      = truncateTitle(bd.title) or "?",
                 face      = face_title,
-                bold      = true,
+                bold      = title_bold,
                 width     = tw,
                 max_lines = 2,
                 fgcolor   = _CLR_DARK_EFF,
@@ -662,6 +674,7 @@ function M.build(w, ctx)
             meta[#meta+1] = UI.makeColoredText{
                 text            = bd.authors,
                 face            = face_author,
+                bold            = author_bold,
                 fgcolor         = CLR_TEXT_SUB_EFF,
                 width           = tw,
                 max_width       = tw,
@@ -672,7 +685,7 @@ function M.build(w, ctx)
         elseif elem == "progress" and show.progress then
             gap_before(bar_gap_before)
             if bar_style == "with_pct" then
-                meta[#meta+1] = buildProgressBarWithPct(tw, bd.percent, bar_h, scale, lbl_scale, face_inlinepct, _CLR_DARK_EFF)
+                meta[#meta+1] = buildProgressBarWithPct(tw, bd.percent, bar_h, scale, lbl_scale, face_inlinepct, _CLR_DARK_EFF, pct_bold)
             else
                 meta[#meta+1] = UI.progressBar(tw, bd.percent, bar_h)
             end
@@ -684,7 +697,7 @@ function M.build(w, ctx)
             meta[#meta+1] = UI.makeColoredText{
                 text    = string.format(_("%d%% Read"), math.floor((bd.percent or 0) * 100 + 0.5)),
                 face    = face_pct,
-                bold    = true,
+                bold    = pct_bold,
                 fgcolor = _CLR_DARK_EFF,
                 width   = tw,
             }
@@ -785,6 +798,7 @@ function M.build(w, ctx)
                                 stat_widget = UI.makeAlphaTextBox{
                                     text      = stat.text,
                                     face      = face_s,
+                                    bold      = stats_bold,
                                     fgcolor   = stat.has_data and _CLR_DARK_EFF or CLR_PH_EFF,
                                     width     = tw,
                                     alignment = "left",
@@ -793,6 +807,7 @@ function M.build(w, ctx)
                                 stat_widget = TextBoxWidget:new{
                                     text      = stat.text,
                                     face      = face_s,
+                                    bold      = stats_bold,
                                     fgcolor   = stat.has_data and _CLR_DARK_EFF or CLR_PH_EFF,
                                     width     = tw,
                                     alignment = "left",
@@ -818,6 +833,7 @@ function M.build(w, ctx)
                                 stats_widget = UI.makeAlphaTextBox{
                                     text      = group_text,
                                     face      = face_s,
+                                    bold      = stats_bold,
                                     fgcolor   = CLR_TEXT_SUB_EFF,
                                     width     = tw,
                                     alignment = "left",
@@ -826,6 +842,7 @@ function M.build(w, ctx)
                                 stats_widget = TextBoxWidget:new{
                                     text      = group_text,
                                     face      = face_s,
+                                    bold      = stats_bold,
                                     fgcolor   = CLR_TEXT_SUB_EFF,
                                     width     = tw,
                                     alignment = "left",
@@ -917,6 +934,7 @@ function M.build(w, ctx)
                         stats_widget = UI.makeAlphaTextBox{
                             text      = stats_text,
                             face      = face_s,
+                            bold      = stats_bold,
                             fgcolor   = CLR_TEXT_SUB_EFF,
                             width     = tw,
                             alignment = "left",
@@ -925,6 +943,7 @@ function M.build(w, ctx)
                         stats_widget = TextBoxWidget:new{
                             text      = stats_text,
                             face      = face_s,
+                            bold      = stats_bold,
                             fgcolor   = CLR_TEXT_SUB_EFF,
                             width     = tw,
                             alignment = "left",
@@ -1065,11 +1084,13 @@ function M.getHeight(_ctx)
         percent_per_day  = _showElem(pfx, "percent_per_day"),
     }
 
-    -- Measure real line heights using the same font faces as build().
-    local title_fs  = math.max(8, math.floor(_BASE_TITLE_FS  * scale * lbl_scale))
-    local author_fs = math.max(8, math.floor(_BASE_AUTHOR_FS * scale * lbl_scale))
-    local pct_fs    = math.max(8, math.floor(_BASE_PCT_FS    * scale * lbl_scale))
-    local stats_fs  = math.max(7, math.floor(_BASE_STATS_FS  * scale * lbl_scale))
+    -- Measure real line heights using the same font sizes as build().
+    local styles = Text.styles(_ctx, M.id, TEXT_ELEMS)
+    local function ts(elem) return Text.scale(styles, elem) end
+    local title_fs  = math.max(8, math.floor(_BASE_TITLE_FS  * scale * lbl_scale * ts("title")))
+    local author_fs = math.max(8, math.floor(_BASE_AUTHOR_FS * scale * lbl_scale * ts("author")))
+    local pct_fs    = math.max(8, math.floor(_BASE_PCT_FS    * scale * lbl_scale * ts("percent")))
+    local stats_fs  = math.max(7, math.floor(_BASE_STATS_FS  * scale * lbl_scale * ts("stats")))
     local bar_h     = math.max(1, math.floor(_BASE_BAR_H          * scale))
     local bar_gap_b = math.max(1, math.floor(_BASE_BAR_GAP_BEFORE * scale))
     local bar_gap_a = math.max(1, math.floor(_BASE_BAR_GAP_AFTER  * scale))
@@ -1381,7 +1402,7 @@ function M.getMenuItems(ctx_menu)
         },
     }
 
-    return {
+    local items = {
         _makeScaleItem(ctx_menu),
         _makeTextScaleItem(ctx_menu),
         thumb,
@@ -1440,6 +1461,16 @@ function M.getMenuItems(ctx_menu)
             end,
         },
     }
+
+    -- Per-element Font / Style / Size after Text Size (SimpleUI 3.0+ only).
+    local text_item = Text.menu(M.id, TEXT_ELEMS, {
+        title   = _("Title"),
+        author  = _("Author"),
+        percent = _("Percentage"),
+        stats   = _("Statistics"),
+    }, pfx, refresh)
+    if text_item then table.insert(items, 3, text_item) end
+    return items
 end
 
 return M

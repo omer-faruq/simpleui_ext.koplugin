@@ -1467,3 +1467,27 @@ msgstr "—T verbleibend"
 msgid "—wpm"
 msgstr "—S/Min"
 
+
+msgid "Headers"
+msgstr "Überschriften"
+
+msgid "Values"
+msgstr "Werte"
+
+msgid "Labels"
+msgstr "Beschriftungen"
+
+msgid "Percentage"
+msgstr "Prozentsatz"
+
+msgid "Statistics"
+msgstr "Statistiken"
+
+msgid "Sections"
+msgstr "Abschnitte"
+
+msgid "This Book"
+msgstr "Dieses Buch"
+
+msgid "Pace"
+msgstr "Tempo"

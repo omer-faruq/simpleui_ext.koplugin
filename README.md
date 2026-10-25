@@ -43,6 +43,7 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
 - Title (bold, up to 2 lines) and author
 - Description blurb pulled from BookInfoManager / DocSettings / custom metadata
 - Progress bar with page count and estimated time remaining (sourced from the Statistics plugin database)
+- Follows KOReader's stable page numbers for books where "Use stable page numbers" is on
 - Tap to open the book
 - Supports SimpleUI's module scaling, theme colours, and frame/background options
 
@@ -76,6 +77,8 @@ Displays reading statistics for the most recently opened book in a compact two-p
 - **BOOK panel** — progress %, pages read, time spent, estimated time remaining
 - **PACE panel** — days reading, estimated days to finish, avg time per day, pages per minute
 - Book title embedded in the BOOK header (pixel-accurate truncation with ellipsis)
+- Follows KOReader's stable page numbers for books where "Use stable page numbers" is on (pages read, pages/min)
+- Either panel can be hidden (e.g. show only PACE); the remaining one takes the full width
 - Tap to open the book
 - Wallpaper-aware: all text areas transparent, headers show a solid underline instead of a filled background
 - 5-minute cache per book; automatically invalidated when the book is closed so stats are always fresh on return
@@ -86,7 +89,9 @@ Displays reading statistics for the most recently opened book in a compact two-p
 | Setting | Description |
 |---|---|
 | Scale | Resize the card proportionally |
+| Text | Font, style and size for headers, values and labels (SimpleUI 3.0+) |
 | Time Format | Human-readable (e.g. 3.5 hours) or compact XhYm (e.g. 3h30m) |
+| Sections | Show or hide the This Book and Pace panels (one always stays) |
 | Tap to Open Book | Tapping the card opens the most recently read book |
 | Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are skipped |
 
@@ -119,6 +124,7 @@ Displays current and best reading streaks (daily and weekly) in a compact four-c
 |---|---|
 | Show section label | Toggle "Reading Streaks" header visibility |
 | Scale | Resize the card proportionally |
+| Text | Font, style and size for headers and values (SimpleUI 3.0+) |
 
 </details>
 
@@ -194,6 +200,7 @@ Enhanced version of SimpleUI's built-in Currently Reading module with additional
 | Setting | Description |
 |---|---|
 | Scale | Resize the card proportionally |
+| Text | Font, style and size for title, author, percentage and statistics (SimpleUI 3.0+) |
 | Show avg_time_per_day | Toggle average time per day visibility |
 | Show pages_per_minute | Toggle reading speed visibility |
 | Show percent_per_day | Toggle progress per day visibility |
@@ -236,6 +243,7 @@ A completely redesigned, highly detailed, and fully dynamic reading statistics d
 - **Advanced Progress Bars (6 styles):** Simple, With percentage, Bold, Minimal, Outline, Segmented
 - **Full Control (Edit Items):** Show/hide any statistic, rearrange display order with drag-and-drop
 - **Smart Info Screen:** Tap book/author name to view full book description
+- **Stable Page Numbers:** Page counts follow KOReader's stable page numbers when they are on for the book
 - **Flexible Font & Size Controls:** Customize fonts and sizes for title, author, values, and labels
 - **Time Format Options:** Readable (e.g., 3.5 hours) or XhYm (e.g., 3h 30 min)
 

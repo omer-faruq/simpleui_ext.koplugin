@@ -49,6 +49,7 @@ local VerticalSpan    = require("ui/widget/verticalspan")
 local util            = require("util")
 local logger          = require("logger")
 local StablePages     = require("utils/sui_ext_pages")
+local Text            = require("utils/sui_ext_text")
 local _ = require("sui_ext_i18n").translate
 
 -- ---------------------------------------------------------------------------
@@ -102,6 +103,8 @@ end
 local SK_TIME_FMT      = "rbs_time_format"
 local SK_TAPPABLE      = "rbs_tappable"
 local SK_EXCLUDE_PATHS = "rbs_exclude_paths"
+local SK_SHOW_BOOK     = "rbs_show_book"
+local SK_SHOW_PACE     = "rbs_show_pace"
 local FMT_NICKEL  = "nickel"   -- human (e.g. "3.5 hours")
 local FMT_XHYM    = "xhym"    -- compact (e.g. "3h30m")
 
@@ -109,6 +112,13 @@ local function getTimeFmt(pfx)
     local S = getSettings()
     local v = S and S:readSetting(pfx .. SK_TIME_FMT)
     return (v == FMT_XHYM) and FMT_XHYM or FMT_NICKEL
+end
+
+-- Section visibility; both sections show by default.
+local function showSection(pfx, key)
+    local S = getSettings()
+    if not S then return true end
+    return S:readSetting(pfx .. key) ~= false
 end
 
 local function isTappable(pfx)
@@ -472,9 +482,9 @@ end
 
 -- transparent=true: no FrameContainer (avoids opaque fill) — text with
 -- padding + a solid bottom line the same color as the header text.
-local function mkSectionHeader(face, text, full_w, bg_color, left_pad, transparent)
+local function mkSectionHeader(face, text, full_w, bg_color, left_pad, transparent, bold)
     left_pad = left_pad or Size.padding.large
-    local tw = TextWidget:new{ text = text, face = face }
+    local tw = TextWidget:new{ text = text, face = face, bold = bold }
     if transparent then
         return VerticalGroup:new{
             align = "left",
@@ -508,17 +518,18 @@ end
 -- Builds a single "{value}  {unit} {extra}" cell.
 -- make_tbw(args) is a drop-in for TextBoxWidget:new that produces an
 -- alpha-composited widget when a wallpaper is active.
-local function mkValueLine(face_val, face_lbl, col_w, data, extra, make_tbw)
+-- val_bold/lbl_bold: embolden flags of the faces (see utils/sui_ext_text).
+local function mkValueLine(face_val, face_lbl, col_w, data, extra, make_tbw, val_bold, lbl_bold)
     local desc = (data and data.unit) or ""
     if extra and extra ~= "" then
         desc = (desc ~= "") and (desc .. " " .. extra) or extra
     end
     if not data or data.value == "" then
         return make_tbw({
-            text = desc, face = face_lbl, width = col_w, alignment = "left",
+            text = desc, face = face_lbl, width = col_w, alignment = "left", bold = lbl_bold,
         })
     end
-    local vw    = TextWidget:new{ text = data.value, face = face_val }
+    local vw    = TextWidget:new{ text = data.value, face = face_val, bold = val_bold }
     local vw_w  = vw:getSize().w
     local lbl_w = math.max(1, col_w - vw_w - Size.padding.large)
     return HorizontalGroup:new{
@@ -526,7 +537,7 @@ local function mkValueLine(face_val, face_lbl, col_w, data, extra, make_tbw)
         vw,
         HorizontalSpan:new{ width = Size.padding.large },
         make_tbw({
-            text = desc, face = face_lbl, width = lbl_w, alignment = "left",
+            text = desc, face = face_lbl, width = lbl_w, alignment = "left", bold = lbl_bold,
         }),
     }
 end
@@ -603,6 +614,19 @@ M.default_on      = false
 M.is_book_mod     = true   -- suppresses the homescreen "no books yet" empty-state
 M.needs           = { db = true, books = true }  -- request shared stats DB conn from homescreen
 
+-- Text elements with a user-selectable font, style and size (SimpleUI 3.0+).
+local TEXT_ELEMS = { "header", "value", "label" }
+M.text_elems     = TEXT_ELEMS
+Text.declare(M.id, { value = "bold" })
+
+local function legacyHeaderFace(fs) return Font:getFace("x_smallinfofont", fs) end
+local function legacyValueFace(fs)
+    return Font:getFace("NotoSerif-Bold.ttf", fs) or Font:getFace("tfont", fs)
+end
+local function legacyLabelFace(fs)
+    return Font:getFace("NotoSerif-Regular.ttf", fs) or Font:getFace("x_smallinfofont")
+end
+
 function M.reset()
     _Config      = nil
     _SUISettings = nil
@@ -657,16 +681,17 @@ function M.build(w, ctx)
     CLR_TEXT   = themeColor("fg")        or CLR_TEXT
     CLR_SEP    = themeColor("separator") or CLR_SEP
 
-    -- Fonts — side-by-side layout: larger values, compact labels
+    -- Fonts — side-by-side layout: larger values, compact labels.
+    -- Each element follows the user's text style (Font / Style / Size).
+    local styles  = Text.styles(ctx, M.id, TEXT_ELEMS)
     local base_val_fs = 30
     local base_lbl_fs = 11
-    local val_fs  = math.max(14, math.floor(base_val_fs * scale))
-    local lbl_fs  = math.max(8,  math.floor(base_lbl_fs * scale))
-    local sec_fs  = Font:getFace("x_smallinfofont")
-    local face_v  = Font:getFace("NotoSerif-Bold.ttf", val_fs)
-                    or Font:getFace("tfont", val_fs)
-    local face_l  = Font:getFace("NotoSerif-Regular.ttf", lbl_fs)
-                    or Font:getFace("x_smallinfofont")
+    local hdr_fs  = math.max(6,  math.floor(Font.sizemap.x_smallinfofont * Text.scale(styles, "header")))
+    local val_fs  = math.max(14, math.floor(base_val_fs * scale * Text.scale(styles, "value")))
+    local lbl_fs  = math.max(8,  math.floor(base_lbl_fs * scale * Text.scale(styles, "label")))
+    local sec_fs, sec_bold = Text.face(styles, M.id, "header", hdr_fs, legacyHeaderFace, false)
+    local face_v, v_bold   = Text.face(styles, M.id, "value",  val_fs, legacyValueFace,  false)
+    local face_l, l_bold   = Text.face(styles, M.id, "label",  lbl_fs, legacyLabelFace,  false)
 
     -- Layout: two section panels side by side (THIS BOOK left, PACE right)
     -- Each panel has its own two-column value layout.
@@ -674,7 +699,12 @@ function M.build(w, ctx)
     local ig       = Screen:scaleBySize(10)            -- gap around inner column separator
     local isep_w   = 2 * ig + Size.line.medium         -- inner col separator width
     local vsep_w   = isep_w                            -- section separator (same style)
-    local panel_w  = math.max(1, math.floor((w - vsep_w) / 2))
+    -- Sections the user wants; one always stays, so the card is never empty.
+    local show_book = showSection(pfx, SK_SHOW_BOOK)
+    local show_pace = showSection(pfx, SK_SHOW_PACE)
+    if not show_book and not show_pace then show_book = true end
+    local both     = show_book and show_pace
+    local panel_w  = both and math.max(1, math.floor((w - vsep_w) / 2)) or w
     local icol_w   = math.max(1, math.floor((panel_w - 2 * ip - isep_w) / 2))
 
     -- Wallpaper transparency helper: replaces TextBoxWidget:new when a
@@ -700,18 +730,18 @@ function M.build(w, ctx)
         local fs     = val_fs
         local min_fs = math.max(9, val_fs - 12)
         local face   = face_v
-        local tw     = TextWidget:new{ text = text, face = face }
+        local tw     = TextWidget:new{ text = text, face = face, bold = v_bold }
         while tw:getSize().w > max_w and fs > min_fs do
             fs   = fs - 1
-            face = Font:getFace("NotoSerif-Bold.ttf", fs) or Font:getFace("tfont", fs)
-            tw   = TextWidget:new{ text = text, face = face }
+            face = (Text.face(styles, M.id, "value", fs, legacyValueFace, false))
+            tw   = TextWidget:new{ text = text, face = face, bold = v_bold }
         end
         return face
     end
 
     local function pvline(data, extra)
         if not data or data.value == "" then
-            return mkValueLine(face_v, face_l, icol_w, data, extra, make_tbw)
+            return mkValueLine(face_v, face_l, icol_w, data, extra, make_tbw, v_bold, l_bold)
         end
         -- Mirror mkValueLine's label logic to know how much width the value can use.
         local desc = data.unit or ""
@@ -723,7 +753,7 @@ function M.build(w, ctx)
             and math.max(1, math.floor(icol_w * 0.55))
             or  math.max(1, icol_w - Size.padding.small)
         local vface = fitValFace(data.value, max_val_w)
-        return mkValueLine(vface, face_l, icol_w, data, extra, make_tbw)
+        return mkValueLine(vface, face_l, icol_w, data, extra, make_tbw, v_bold, l_bold)
     end
     local function ptrow(l, r)
         return HorizontalGroup:new{
@@ -750,7 +780,7 @@ function M.build(w, ctx)
             tb_header_text = _("BOOK")
         else
             -- Check if the full header fits
-            local tw = TextWidget:new{ text = prefix .. tb_title, face = sec_fs }
+            local tw = TextWidget:new{ text = prefix .. tb_title, face = sec_fs, bold = sec_bold }
             if tw:getSize().w <= avail_w then
                 tb_header_text = prefix .. tb_title
             else
@@ -764,7 +794,7 @@ function M.build(w, ctx)
                     end
                     s = s:sub(1, i - 1)
                     if s == "" then break end
-                    tw = TextWidget:new{ text = prefix .. s .. ellipsis, face = sec_fs }
+                    tw = TextWidget:new{ text = prefix .. s .. ellipsis, face = sec_fs, bold = sec_bold }
                 until tw:getSize().w <= avail_w
                 tb_header_text = (s ~= "") and (prefix .. s .. ellipsis) or _("BOOK")
             end
@@ -773,7 +803,7 @@ function M.build(w, ctx)
 
     -- ──  BOOK panel ───────────────────────────────────────────────────────────
     local tb_panel = VerticalGroup:new{ align = "left" }
-    tb_panel[#tb_panel+1] = mkSectionHeader(sec_fs, tb_header_text, panel_w, CLR_HDR_BG, nil, has_wp)
+    tb_panel[#tb_panel+1] = mkSectionHeader(sec_fs, tb_header_text, panel_w, CLR_HDR_BG, nil, has_wp, sec_bold)
     tb_panel[#tb_panel+1] = VerticalSpan:new{ height = Size.padding.default }
     -- Row 1: progress% | pages read
     tb_panel[#tb_panel+1] = ptrow(pvline(stats.book_progress, ""), pvline(stats.book_pages_read, ""))
@@ -784,7 +814,7 @@ function M.build(w, ctx)
 
     -- ── PACE panel ────────────────────────────────────────────────────────────
     local pa_panel = VerticalGroup:new{ align = "left" }
-    pa_panel[#pa_panel+1] = mkSectionHeader(sec_fs, _("PACE"), panel_w, CLR_HDR_BG, nil, has_wp)
+    pa_panel[#pa_panel+1] = mkSectionHeader(sec_fs, _("PACE"), panel_w, CLR_HDR_BG, nil, has_wp, sec_bold)
     pa_panel[#pa_panel+1] = VerticalSpan:new{ height = Size.padding.default }
     -- Row 3: days reading | days to go
     pa_panel[#pa_panel+1] = ptrow(pvline(stats.days_reading, ""), pvline(stats.days_to_go, ""))
@@ -794,19 +824,23 @@ function M.build(w, ctx)
     pa_panel[#pa_panel+1] = VerticalSpan:new{ height = Size.padding.default }
 
     -- Combine panels with a thin vertical separator (same style as inner col separators)
-    local panels_h = math.max(tb_panel:getSize().h, pa_panel:getSize().h)
     local card = VerticalGroup:new{ align = "left" }
-    card[#card+1] = HorizontalGroup:new{
-        align = "top",
-        tb_panel,
-        HorizontalSpan:new{ width = ig },
-        LineWidget:new{
-            dimen      = Geom:new{ w = Size.line.medium, h = panels_h },
-            background = Blitbuffer.COLOR_GRAY,
-        },
-        HorizontalSpan:new{ width = ig },
-        pa_panel,
-    }
+    if both then
+        local panels_h = math.max(tb_panel:getSize().h, pa_panel:getSize().h)
+        card[#card+1] = HorizontalGroup:new{
+            align = "top",
+            tb_panel,
+            HorizontalSpan:new{ width = ig },
+            LineWidget:new{
+                dimen      = Geom:new{ w = Size.line.medium, h = panels_h },
+                background = Blitbuffer.COLOR_GRAY,
+            },
+            HorizontalSpan:new{ width = ig },
+            pa_panel,
+        }
+    else
+        card[#card+1] = show_book and tb_panel or pa_panel
+    end
 
     -- Wrap in a tappable InputContainer so the user can open the book.
     if not (book and isTappable(pfx) and ctx and ctx.open_fn) then
@@ -849,9 +883,12 @@ function M.getHeight(ctx)
     local scale  = Config and Config.getModuleScale("recent_book_stats", pfx) or 1.0
     local PAD    = UI and UI.PAD or Screen:scaleBySize(14)
 
-    -- Approximate: 1 row of headers + 2 value rows (side-by-side layout)
-    local hdr_h   = Screen:scaleBySize(22) * scale
+    -- Approximate: 1 row of headers + 2 value rows (side-by-side layout),
+    -- grown by the user's text sizes.
+    local styles  = Text.styles(ctx, M.id, TEXT_ELEMS)
+    local hdr_h   = Screen:scaleBySize(22) * scale * Text.scale(styles, "header")
     local row_h   = Screen:scaleBySize(38) * scale   -- 30pt values
+                    * math.max(Text.scale(styles, "value"), Text.scale(styles, "label"))
     local spans   = (Size.padding.default * 2) * scale
     local content = hdr_h + row_h * 2 + spans
     local label_h = Config and Config.getScaledLabelH() or 0
@@ -876,6 +913,23 @@ local function makeLabelToggleItem(Config, mod_id, refresh)
     return Config.makeLabelToggleItem(mod_id, refresh, _)
 end
 
+-- Checkbox for one section; locked while it is the only one shown.
+local function sectionToggle(pfx, refresh, text, key, other_key)
+    return {
+        text           = text,
+        checked_func   = function() return showSection(pfx, key) end,
+        enabled_func   = function()
+            return not showSection(pfx, key) or showSection(pfx, other_key)
+        end,
+        keep_menu_open = true,
+        callback       = function()
+            local S = getSettings()
+            if S then S:saveSetting(pfx .. key, not showSection(pfx, key)) end
+            refresh()
+        end,
+    }
+end
+
 function M.getMenuItems(ctx_menu)
     local Config = getConfig()
     if not Config then return nil end
@@ -884,7 +938,7 @@ function M.getMenuItems(ctx_menu)
     local refresh = ctx_menu.refresh
     local S       = getSettings()
 
-    return {
+    local items = {
         -- 1. Label visibility toggle
         makeLabelToggleItem(Config, M.id, refresh),
 
@@ -936,6 +990,15 @@ function M.getMenuItems(ctx_menu)
                         refresh()
                     end,
                 },
+            },
+        },
+
+        -- 3b. Sections: either may be hidden, never both
+        {
+            text = _("Sections"),
+            sub_item_table = {
+                sectionToggle(pfx, refresh, _("This Book"), SK_SHOW_BOOK, SK_SHOW_PACE),
+                sectionToggle(pfx, refresh, _("Pace"),      SK_SHOW_PACE, SK_SHOW_BOOK),
             },
         },
 
@@ -999,6 +1062,15 @@ function M.getMenuItems(ctx_menu)
             end,
         },
     }
+
+    -- Per-element Font / Style / Size after Scale (SimpleUI 3.0+ only).
+    local text_item = Text.menu(M.id, TEXT_ELEMS, {
+        header = _("Headers"),
+        value  = _("Values"),
+        label  = _("Labels"),
+    }, pfx, refresh)
+    if text_item then table.insert(items, 3, text_item) end
+    return items
 end
 
 return M

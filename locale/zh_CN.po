@@ -1554,3 +1554,27 @@ msgstr "— 天剩余"
 msgid "—wpm"
 msgstr "— 字/分钟"
 
+
+msgid "Headers"
+msgstr "标题"
+
+msgid "Values"
+msgstr "数值"
+
+msgid "Labels"
+msgstr "标签"
+
+msgid "Percentage"
+msgstr "百分比"
+
+msgid "Statistics"
+msgstr "统计"
+
+msgid "Sections"
+msgstr "分区"
+
+msgid "This Book"
+msgstr "本书"
+
+msgid "Pace"
+msgstr "节奏"

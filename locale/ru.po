@@ -1469,3 +1469,27 @@ msgstr "—д осталось"
 msgid "—wpm"
 msgstr "—стр/мин"
 
+
+msgid "Headers"
+msgstr "Заголовки"
+
+msgid "Values"
+msgstr "Значения"
+
+msgid "Labels"
+msgstr "Подписи"
+
+msgid "Percentage"
+msgstr "Процент"
+
+msgid "Statistics"
+msgstr "Статистика"
+
+msgid "Sections"
+msgstr "Разделы"
+
+msgid "This Book"
+msgstr "Эта книга"
+
+msgid "Pace"
+msgstr "Темп"

@@ -35,6 +35,17 @@ local SQ3 = require("lua-ljsqlite3/init")
 local util = require("util")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("sui_ext_i18n").translate
+local Text = require("utils/sui_ext_text")
+
+-- Text elements with a user-selectable font, style and size (SimpleUI 3.0+).
+local MOD_ID     = "reading_streaks"
+local TEXT_ELEMS = { "header", "value" }
+Text.declare(MOD_ID, { value = "bold" })
+
+local function legacyHeaderFace(fs) return Font:getFace("x_smallinfofont", fs) end
+local function legacyValueFace(fs)
+    return Font:getFace("NotoSerif-Bold.ttf", fs) or Font:getFace("tfont", fs)
+end
 
 -- Inline reading data provider (shared cache with 2-reading-insights-popup.lua)
 local db_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
@@ -274,9 +285,9 @@ local function formatCount(value)
     return util.getFormattedSize(value)
 end
 
-local function mkSectionHeader(face, text, full_w, bg_color, left_pad, transparent)
+local function mkSectionHeader(face, text, full_w, bg_color, left_pad, transparent, bold)
     left_pad = left_pad or Size.padding.default
-    local tw = TextWidget:new{ text = text, face = face }
+    local tw = TextWidget:new{ text = text, face = face, bold = bold }
     if transparent then
         return VerticalGroup:new{
             align = "left",
@@ -306,10 +317,12 @@ local function mkSectionHeader(face, text, full_w, bg_color, left_pad, transpare
     }
 end
 
-local function mkStreakColumn(value, header_text, col_w, face_val, has_wp, UI)
+-- f: { val, val_bold, hdr, hdr_bold } faces and embolden flags.
+local function mkStreakColumn(value, header_text, col_w, f, has_wp, UI)
     local value_widget = TextWidget:new{
         text = formatCount(value),
-        face = face_val,
+        face = f.val,
+        bold = f.val_bold,
     }
     
     local content = VerticalGroup:new{
@@ -322,7 +335,7 @@ local function mkStreakColumn(value, header_text, col_w, face_val, has_wp, UI)
     
     return VerticalGroup:new{
         align = "left",
-        mkSectionHeader(Font:getFace("x_smallinfofont"), header_text, col_w, Blitbuffer.COLOR_GRAY_D, Size.padding.default, has_wp),
+        mkSectionHeader(f.hdr, header_text, col_w, Blitbuffer.COLOR_GRAY_D, Size.padding.default, has_wp, f.hdr_bold),
         VerticalSpan:new{ height = Size.padding.default },
         content,
         VerticalSpan:new{ height = Size.padding.default },
@@ -343,14 +356,18 @@ local function buildStreaksWidget(w, ctx, data)
     local total_gaps = 3 * (gap * 2 + sep_w)
     local col_w = math.floor((w - total_gaps) / 4)
     
+    local styles = Text.styles(ctx, MOD_ID, TEXT_ELEMS)
     local base_val_fs = 32
-    local val_fs = math.max(16, math.floor(base_val_fs * scale))
-    local face_val = Font:getFace("NotoSerif-Bold.ttf", val_fs) or Font:getFace("tfont", val_fs)
+    local val_fs = math.max(16, math.floor(base_val_fs * scale * Text.scale(styles, "value")))
+    local hdr_fs = math.max(6, math.floor(Font.sizemap.x_smallinfofont * Text.scale(styles, "header")))
+    local f = {}
+    f.val, f.val_bold = Text.face(styles, MOD_ID, "value",  val_fs, legacyValueFace,  false)
+    f.hdr, f.hdr_bold = Text.face(styles, MOD_ID, "header", hdr_fs, legacyHeaderFace, false)
     
-    local col1 = mkStreakColumn(streaks.weeks.current, _("CURR. WEEKS"), col_w, face_val, has_wp, UI)
-    local col2 = mkStreakColumn(streaks.days.current, _("CURR. DAYS"), col_w, face_val, has_wp, UI)
-    local col3 = mkStreakColumn(streaks.weeks.best, _("BEST WEEKS"), col_w, face_val, has_wp, UI)
-    local col4 = mkStreakColumn(streaks.days.best, _("BEST DAYS"), col_w, face_val, has_wp, UI)
+    local col1 = mkStreakColumn(streaks.weeks.current, _("CURR. WEEKS"), col_w, f, has_wp, UI)
+    local col2 = mkStreakColumn(streaks.days.current, _("CURR. DAYS"), col_w, f, has_wp, UI)
+    local col3 = mkStreakColumn(streaks.weeks.best, _("BEST WEEKS"), col_w, f, has_wp, UI)
+    local col4 = mkStreakColumn(streaks.days.best, _("BEST DAYS"), col_w, f, has_wp, UI)
     
     local cols_h = math.max(col1:getSize().h, col2:getSize().h, col3:getSize().h, col4:getSize().h)
     
@@ -399,6 +416,7 @@ local module = {
     -- See the note in module_hero_currently.lua: SimpleUI 2.5's engine
     -- only opens the shared stats DB for an external module that asks.
     needs           = { db = true },
+    text_elems      = TEXT_ELEMS,
 }
 
 function module.build(w, ctx)
@@ -441,7 +459,7 @@ function module.getMenuItems(ctx_menu)
     local pfx = ctx_menu.pfx
     local refresh = ctx_menu.refresh
 
-    return {
+    local items = {
         makeLabelToggleItem(Config, module.id, refresh),
         Config.makeScaleItem({
             text_func = function()
@@ -458,6 +476,14 @@ function module.getMenuItems(ctx_menu)
             refresh = refresh,
         }),
     }
+
+    -- Per-element Font / Style / Size (SimpleUI 3.0+ only).
+    local text_item = Text.menu(MOD_ID, TEXT_ELEMS, {
+        header = _("Headers"),
+        value  = _("Values"),
+    }, pfx, refresh)
+    if text_item then items[#items + 1] = text_item end
+    return items
 end
 
 return module

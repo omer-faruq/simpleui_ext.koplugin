@@ -1509,3 +1509,27 @@ msgstr ""
 msgid "—wpm"
 msgstr ""
 
+
+msgid "Headers"
+msgstr ""
+
+msgid "Values"
+msgstr ""
+
+msgid "Labels"
+msgstr ""
+
+msgid "Percentage"
+msgstr ""
+
+msgid "Statistics"
+msgstr ""
+
+msgid "Sections"
+msgstr ""
+
+msgid "This Book"
+msgstr ""
+
+msgid "Pace"
+msgstr ""
