@@ -1533,3 +1533,12 @@ msgstr ""
 
 msgid "Pace"
 msgstr ""
+
+msgid "Text"
+msgstr ""
+
+msgid "At least one section must stay visible."
+msgstr ""
+
+msgid "Progress"
+msgstr ""

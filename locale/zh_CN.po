@@ -1578,3 +1578,12 @@ msgstr "本书"
 
 msgid "Pace"
 msgstr "节奏"
+
+msgid "Text"
+msgstr "文本"
+
+msgid "At least one section must stay visible."
+msgstr "至少保留一个分区可见。"
+
+msgid "Progress"
+msgstr "进度"

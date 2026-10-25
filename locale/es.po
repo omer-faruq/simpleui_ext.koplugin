@@ -1491,3 +1491,12 @@ msgstr "Este libro"
 
 msgid "Pace"
 msgstr "Ritmo"
+
+msgid "Text"
+msgstr "Texto"
+
+msgid "At least one section must stay visible."
+msgstr "Al menos una sección debe seguir visible."
+
+msgid "Progress"
+msgstr "Progreso"

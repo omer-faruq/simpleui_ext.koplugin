@@ -15,9 +15,21 @@ local M = {}
 local _variants = {}   -- mod_id → { elem → default variant }
 local _declared = {}   -- mod_id → true once SimpleUI knows its defaults
 
+local logger = require("logger")
+local _      = require("sui_ext_i18n").translate
+
+local _warned = false
+
+-- SimpleUI's Config when it has per-element text styles, else nil. The reason
+-- is logged once, so a missing menu can be traced in crash.log.
 local function config()
     local ok, C = pcall(require, "sui_config")
-    if ok and type(C) == "table" and C.getTextStyle and C.makeTextSection then return C end
+    if ok and type(C) == "table" and type(C.getTextStyle) == "function" then return C end
+    if not _warned then
+        _warned = true
+        logger.warn("simpleui_ext: per-element text styles unavailable:",
+            ok and "sui_config has no getTextStyle (SimpleUI < 3.0?)" or tostring(C))
+    end
     return nil
 end
 
@@ -43,7 +55,13 @@ function M.styles(ctx, mod_id, elems)
     local C = config()
     if not C then return nil end
     ensureDeclared(C, mod_id)
-    local ok, styles = pcall(C.readTextStyles, mod_id, elems, ctx and ctx.pfx)
+    local pfx = ctx and ctx.pfx
+    local ok, styles = pcall(function()
+        if C.readTextStyles then return C.readTextStyles(mod_id, elems, pfx) end
+        local out = {}
+        for _i, elem in ipairs(elems) do out[elem] = C.getTextStyle(mod_id, elem, pfx) end
+        return out
+    end)
     return ok and styles or nil
 end
 
@@ -76,14 +94,27 @@ function M.menu(mod_id, elems, labels, pfx, refresh)
     local C = config()
     if not C then return nil end
     ensureDeclared(C, mod_id)
-    local ok, item = pcall(C.makeTextSection, {
-        mod_id  = mod_id,
-        elems   = elems,
-        labels  = labels,
-        pfx     = pfx,
-        refresh = refresh,
-    })
-    return ok and item or nil
+    local opts = { mod_id = mod_id, elems = elems, labels = labels, pfx = pfx, refresh = refresh }
+    -- makeTextSection is the newest entry point; earlier 3.x builds only
+    -- have makeTextStyleMenu (same options) or the per-element item.
+    local ok, item = pcall(function()
+        if C.makeTextSection   then return C.makeTextSection(opts) end
+        if C.makeTextStyleMenu then return C.makeTextStyleMenu(opts) end
+        if C.makeTextStyleItem then
+            local rows = {}
+            for _i, elem in ipairs(elems) do
+                rows[#rows + 1] = C.makeTextStyleItem({
+                    mod_id = mod_id, elem = elem, title = labels[elem], pfx = pfx, refresh = refresh,
+                })
+            end
+            return { text = _("Text"), sub_item_table = rows }
+        end
+    end)
+    if not ok or not item then
+        logger.warn("simpleui_ext: text style menu unavailable for", mod_id, ok and "" or tostring(item))
+        return nil
+    end
+    return item
 end
 
 return M

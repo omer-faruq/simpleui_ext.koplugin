@@ -30,6 +30,7 @@ local VerticalSpan     = require("ui/widget/verticalspan")
 local Size             = require("ui/size")
 local logger           = require("logger")
 local StablePages      = require("utils/sui_ext_pages")
+local Text             = require("utils/sui_ext_text")
 local _                = require("sui_ext_i18n").translate
 
 -- ---------------------------------------------------------------------------
@@ -576,6 +577,13 @@ M.is_book_mod     = true    -- suppresses "No books opened yet" empty-state
 -- Declare DB need so the homescreen opens a stats connection when we are active.
 M.needs           = { db = true, books = true }
 
+-- Text elements with a user-selectable font, style and size (SimpleUI 3.0+).
+local TEXT_ELEMS = { "title", "author", "description", "progress", "stats" }
+M.text_elems     = TEXT_ELEMS
+Text.declare(M.id, { title = "bold", progress = "bold" })
+
+local function legacyFace(fs) return Font:getFace("smallinfofont", fs) end
+
 -- Called by the homescreen on hot-reload to drop cached references
 function M.reset()
     _SH = nil
@@ -773,19 +781,24 @@ function M.build(w, ctx)
     local COVER_H = math.floor(COVER_W * 1.5)  -- bookshelf: hero_cover_h = hero_cover_w * 1.5
 
     local cover_gap  = math.max(0, math.floor(_BASE_COVER_GAP  * scale))
-    local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale))
-    local author_fs  = math.max(7, math.floor(_BASE_AUTHOR_FS  * scale))
-    local desc_fs    = math.max(7, math.floor(_BASE_DESC_FS    * scale * getDescFsScale(pfx)))
-    local prog_fs    = math.max(7, math.floor(_BASE_PROG_FS    * scale))
+    local styles     = Text.styles(ctx, M.id, TEXT_ELEMS)
+    local function ts(elem) return Text.scale(styles, elem) end
+    local title_fs   = math.max(8, math.floor(_BASE_TITLE_FS   * scale * ts("title")))
+    local author_fs  = math.max(7, math.floor(_BASE_AUTHOR_FS  * scale * ts("author")))
+    local desc_fs    = math.max(7, math.floor(_BASE_DESC_FS    * scale * getDescFsScale(pfx) * ts("description")))
+    local prog_fs    = math.max(7, math.floor(_BASE_PROG_FS    * scale * ts("progress")))
+    local stats_fs   = math.max(7, math.floor(_BASE_PROG_FS    * scale * ts("stats")))
     local bar_h      = prog_fs  -- bookshelf: bar_height = 100% of face.size
     local title_gap  = math.max(1, math.floor(_BASE_TITLE_GAP  * scale))
     local author_gap = math.max(1, math.floor(_BASE_AUTHOR_GAP * scale))
     local desc_gap   = math.max(1, math.floor(_BASE_DESC_GAP   * scale))
 
-    local face_title  = Font:getFace("smallinfofont", title_fs)
-    local face_author = Font:getFace("smallinfofont", author_fs)
-    local face_desc   = Font:getFace("smallinfofont", desc_fs)
-    local face_prog   = Font:getFace("smallinfofont", prog_fs)
+    -- Each face follows the user's Font / Style; the flags say whether to embolden.
+    local face_title,  title_bold  = Text.face(styles, M.id, "title",       title_fs,  legacyFace, true)
+    local face_author, author_bold = Text.face(styles, M.id, "author",      author_fs, legacyFace, false)
+    local face_desc,   desc_bold   = Text.face(styles, M.id, "description", desc_fs,   legacyFace, false)
+    local face_prog,   prog_bold   = Text.face(styles, M.id, "progress",    prog_fs,   legacyFace, true)
+    local face_stats,  stats_bold  = Text.face(styles, M.id, "stats",       stats_fs,  legacyFace, false)
 
     local prefetched = ctx.prefetched and ctx.prefetched[fp]
     local bd         = SH.getBookData(fp, prefetched)
@@ -835,7 +848,7 @@ function M.build(w, ctx)
         width     = tw,
         alignment = "left",
         fgcolor   = CLR_TEXT,
-        bold      = true,
+        bold      = title_bold,
     }
     local title_widget = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(title_args))
                           or TextBoxWidget:new(title_args)
@@ -867,6 +880,7 @@ function M.build(w, ctx)
             height    = math.ceil(face_author.size * 1.3),
             height_overflow_show_ellipsis = true,
             fgcolor   = CLR_SUB,
+            bold      = author_bold,
         }
         right_top[#right_top + 1] = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(author_args))
                                       or TextBoxWidget:new(author_args)
@@ -935,8 +949,8 @@ function M.build(w, ctx)
         end
 
         -- Bold TextWidgets (bookshelf progress region: bold = true)
-        local lw    = TextWidget:new{ text = prog_left,  face = face_prog, fgcolor = CLR_SUB, bold = true }
-        local rw    = prog_right and TextWidget:new{ text = prog_right, face = face_prog, fgcolor = CLR_SUB, bold = true }
+        local lw    = TextWidget:new{ text = prog_left,  face = face_prog, fgcolor = CLR_SUB, bold = prog_bold }
+        local rw    = prog_right and TextWidget:new{ text = prog_right, face = face_prog, fgcolor = CLR_SUB, bold = prog_bold }
         local lw_w  = lw:getSize().w
         local rw_w  = rw and rw:getSize().w or 0
         -- Bookshelf uses two literal spaces as gap (Size.padding.small * 2 ≈ that)
@@ -983,13 +997,15 @@ function M.build(w, ctx)
                 if i > 1 then
                     stats_row[#stats_row+1] = TextWidget:new{
                         text    = " · ",
-                        face    = face_prog,
+                        face    = face_stats,
+                        bold    = stats_bold,
                         fgcolor = CLR_SUB,
                     }
                 end
                 stats_row[#stats_row+1] = TextWidget:new{
                     text    = part,
-                    face    = face_prog,
+                    face    = face_stats,
+                    bold    = stats_bold,
                     fgcolor = CLR_SUB,
                 }
             end
@@ -1047,6 +1063,7 @@ function M.build(w, ctx)
                     height_adjust                 = true,
                     line_height = 0.3,
                     fgcolor     = CLR_SUB,
+                    bold        = desc_bold,
                 }
                 local pwid = ((ctx.text_alpha or ctx.has_wallpaper) and UI and UI.makeAlphaTextBox(desc_args))
                               or TextBoxWidget:new(desc_args)
@@ -1295,7 +1312,7 @@ function M.getMenuItems(ctx_menu)
         }
     end
 
-    return {
+    local items = {
         makeLabelToggleItem(Config, M.id, M.name, refresh, _),
         Config.makeScaleItem({
             text_func    = function()
@@ -1508,6 +1525,17 @@ function M.getMenuItems(ctx_menu)
             end,
         },
     }
+
+    -- Per-element Font / Style / Size after Scale (SimpleUI 3.0+ only).
+    local text_item = Text.menu(M.id, TEXT_ELEMS, {
+        title       = _("Title"),
+        author      = _("Author"),
+        description = _("Description"),
+        progress    = _("Progress"),
+        stats       = _("Statistics"),
+    }, pfx, refresh)
+    if text_item then table.insert(items, 3, text_item) end
+    return items
 end
 
 return M

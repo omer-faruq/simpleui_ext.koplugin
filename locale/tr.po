@@ -1491,3 +1491,12 @@ msgstr "Bu Kitap"
 
 msgid "Pace"
 msgstr "Tempo"
+
+msgid "Text"
+msgstr "Metin"
+
+msgid "At least one section must stay visible."
+msgstr "En az bir bölüm görünür kalmalı."
+
+msgid "Progress"
+msgstr "İlerleme"

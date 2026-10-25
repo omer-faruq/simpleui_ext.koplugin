@@ -52,6 +52,7 @@ Displays the most recently opened book as a full-width hero card, mirroring the 
 | Setting | Description |
 |---|---|
 | Scale | Resize the card proportionally |
+| Text | Font, style and size for title, author, description, progress and statistics (SimpleUI 3.0+) |
 | Show Frame | Draw a thin border around the card |
 | Solid Background | Fill the card background with the theme background colour |
 | Exclude Paths from Recent | Comma-separated path fragments; books whose path contains any fragment are skipped (e.g. `/mnt/onboard/rss,instapaper,cache`) |

@@ -1493,3 +1493,12 @@ msgstr "Эта книга"
 
 msgid "Pace"
 msgstr "Темп"
+
+msgid "Text"
+msgstr "Текст"
+
+msgid "At least one section must stay visible."
+msgstr "Хотя бы один раздел должен оставаться видимым."
+
+msgid "Progress"
+msgstr "Прогресс"

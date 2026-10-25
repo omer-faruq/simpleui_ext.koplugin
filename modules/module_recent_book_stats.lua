@@ -913,18 +913,26 @@ local function makeLabelToggleItem(Config, mod_id, refresh)
     return Config.makeLabelToggleItem(mod_id, refresh, _)
 end
 
--- Checkbox for one section; locked while it is the only one shown.
+-- Checkbox for one section. Unchecking the only section shown is refused.
+-- No enabled_func: SimpleUI 3.0's window hides a disabled row entirely.
 local function sectionToggle(pfx, refresh, text, key, other_key)
     return {
         text           = text,
         checked_func   = function() return showSection(pfx, key) end,
-        enabled_func   = function()
-            return not showSection(pfx, key) or showSection(pfx, other_key)
-        end,
         keep_menu_open = true,
         callback       = function()
+            local on = showSection(pfx, key)
+            if on and not showSection(pfx, other_key) then
+                local UIManager   = require("ui/uimanager")
+                local InfoMessage = require("ui/widget/infomessage")
+                UIManager:show(InfoMessage:new{
+                    text    = _("At least one section must stay visible."),
+                    timeout = 2,
+                })
+                return
+            end
             local S = getSettings()
-            if S then S:saveSetting(pfx .. key, not showSection(pfx, key)) end
+            if S then S:saveSetting(pfx .. key, not on) end
             refresh()
         end,
     }
