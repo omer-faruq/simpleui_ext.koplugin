@@ -56,6 +56,7 @@ local SUISettings  = require("sui_store")
 -- Theme colours go through the compat layer, never sui_style directly:
 -- SimpleUI 2.6 removed getThemeColor(). See M.themeColor in utils/sui_compat.
 local SUICompat    = require("utils/sui_compat")
+local StablePages  = require("utils/sui_ext_pages")
 local PAD          = UI.PAD
 local CLR_TEXT_SUB = UI.CLR_TEXT_SUB
 
@@ -345,7 +346,16 @@ local function gatherStats(book, pfx, conn_ext)
     local cur_page = (pages > 0) and math.max(1, math.floor(pct * pages)) or 0
 
     if pct > 0 then s.book_progress = { value = string.format("%.0f%%", pct * 100), unit = "" } end
-    if pages > 0 then s.book_pages_read = { value = fmtFraction(cur_page, pages), unit = _("read") } end
+    -- Stable page numbers: page counts follow the reader; time/day estimates
+    -- stay in screen pages, like the Statistics plugin.
+    local stable = book.stable
+    if stable then
+        local sp_cur, sp_total, cur_lbl, last_lbl = StablePages.position(stable, pct)
+        s.book_pages_read = {
+            value = cur_lbl and string.format("%s/%s", cur_lbl, last_lbl) or fmtFraction(sp_cur, sp_total),
+            unit  = _("read"),
+        }
+    elseif pages > 0 then s.book_pages_read = { value = fmtFraction(cur_page, pages), unit = _("read") } end
 
     local conn = conn_ext or openStatsDB()
     if not conn then return s end
@@ -398,7 +408,9 @@ local function gatherStats(book, pfx, conn_ext)
     end
 
     if last_session_pages then
-        s.pages_last_session.value = fmtCount(tonumber(last_session_pages))
+        local n = tonumber(last_session_pages)
+        if n and stable then n = Math.round(n * StablePages.ratio(stable, pages)) end
+        s.pages_last_session.value = fmtCount(n)
     end
 
     local avg_time   = ts and ts.avg_time
@@ -410,6 +422,7 @@ local function gatherStats(book, pfx, conn_ext)
 
     if avg_time and avg_time > 0 then
         local ppm = 60 / avg_time
+        if stable then ppm = ppm * StablePages.ratio(stable, pages) end
         s.pages_per_minute = {
             value = (ppm >= 1) and string.format("%.1f", ppm) or string.format("%.2f", ppm),
             unit  = _("pages/min"),
@@ -711,8 +724,14 @@ local function _buildWidget(w, ctx, pfx, SH, bd, cover, stats, D, scale, lbl_sca
 
     local pages_left_data = { value = "", unit = "" }
     local total_p = bd.pages or 0
+    local stable  = StablePages.read(current_fp)
+    local cur_p
+    if stable then
+        cur_p, total_p = StablePages.position(stable, bd.percent)
+    elseif total_p > 0 then
+        cur_p = math.max(1, math.floor((bd.percent or 0) * total_p))
+    end
     if total_p > 0 then
-        local cur_p = math.max(1, math.floor((bd.percent or 0) * total_p))
         local rem_p = math.max(0, total_p - cur_p)
         pages_left_data = { value = tostring(rem_p), unit = _("pages") }
     end
@@ -1183,7 +1202,8 @@ function M.build(w, ctx)
             title = bd.title or "",
             md5 = md5,
             percent = bd.percent or 0,
-            pages = bd.pages or 0
+            pages = bd.pages or 0,
+            stable = StablePages.read(current_fp)
         }
         stats = gatherStats(book_meta, pfx, ctx.db_conn)
         if md5 then cachePut(current_fp, pfx, stats) end

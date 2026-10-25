@@ -48,6 +48,7 @@ local VerticalGroup   = require("ui/widget/verticalgroup")
 local VerticalSpan    = require("ui/widget/verticalspan")
 local util            = require("util")
 local logger          = require("logger")
+local StablePages     = require("utils/sui_ext_pages")
 local _ = require("sui_ext_i18n").translate
 
 -- ---------------------------------------------------------------------------
@@ -333,7 +334,7 @@ local function getMostRecentBook(excludes)
 
     local fp    = entry.file
     local title = entry.title or fp:match("([^/\\]+)%.[^%.]+$") or "?"
-    local md5, percent, pages
+    local md5, percent, pages, stable
 
     local ok_ds, DS = pcall(require, "docsettings")
     if ok_ds and DS then
@@ -342,6 +343,7 @@ local function getMostRecentBook(excludes)
             md5     = ds:readSetting("partial_md5_checksum")
             percent = tonumber(ds:readSetting("percent_finished")) or 0
             pages   = tonumber(ds:readSetting("doc_pages"))        or 0
+            stable  = StablePages.fromDocSettings(ds)
             local props = ds:readSetting("doc_props") or {}
             title = (props.title and props.title ~= "" and props.title) or title
             pcall(function() ds:close() end)
@@ -354,6 +356,7 @@ local function getMostRecentBook(excludes)
         md5     = md5,
         percent = percent or 0,
         pages   = pages   or 0,
+        stable  = stable,
     }
 end
 
@@ -385,7 +388,16 @@ local function gatherStats(book, pfx, conn_ext)
     if pct > 0 then
         s.book_progress = { value = string.format("%.0f%%", pct * 100), unit = "" }
     end
-    if pages > 0 then
+    if book.stable then
+        -- Stable page numbers: show what the reader shows. Time/day estimates
+        -- below stay in screen pages, like the Statistics plugin.
+        local sp_cur, sp_total, cur_lbl, last_lbl = StablePages.position(book.stable, pct)
+        s.book_pages_read = {
+            value = cur_lbl and string.format("%s/%s", cur_lbl, last_lbl)
+                             or fmtFraction(sp_cur, sp_total),
+            unit  = "",
+        }
+    elseif pages > 0 then
         s.book_pages_read = {
             value = fmtFraction(cur_page, pages),
             unit  = "",
@@ -423,6 +435,7 @@ local function gatherStats(book, pfx, conn_ext)
 
     if avg_time and avg_time > 0 then
         local ppm = 60 / avg_time
+        if book.stable then ppm = ppm * StablePages.ratio(book.stable, pages) end
         s.pages_per_minute = {
             value = (ppm >= 1) and string.format("%.1f", ppm)
                                or  string.format("%.2f", ppm),

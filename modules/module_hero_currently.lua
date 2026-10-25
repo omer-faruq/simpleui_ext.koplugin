@@ -29,6 +29,7 @@ local VerticalGroup    = require("ui/widget/verticalgroup")
 local VerticalSpan     = require("ui/widget/verticalspan")
 local Size             = require("ui/size")
 local logger           = require("logger")
+local StablePages      = require("utils/sui_ext_pages")
 local _                = require("sui_ext_i18n").translate
 
 -- ---------------------------------------------------------------------------
@@ -904,9 +905,20 @@ function M.build(w, ctx)
         if not avg_time or avg_time <= 0 then avg_time = bd.avg_time end
 
         local prog_left, prog_right
+        -- Stable page numbers: show the reader's labels; the time-left
+        -- estimate below stays in screen pages, like the Statistics plugin.
+        local stable = StablePages.read(fp)
+        if stable then
+            local cur, total, cur_lbl, last_lbl = StablePages.position(stable, pct)
+            if cur_lbl then
+                prog_left = string.format("%s / %s", cur_lbl, last_lbl)
+            else
+                prog_left = string.format("%d / %d", cur, total)
+            end
+        end
         if bd.pages and bd.pages > 0 then
             local cur  = math.floor(pct * bd.pages)
-            prog_left  = string.format("%d / %d", cur, bd.pages)  -- matches bookshelf: no "p." prefix
+            prog_left  = prog_left or string.format("%d / %d", cur, bd.pages)  -- matches bookshelf: no "p." prefix
             -- Local format rather than SH.formatTimeLeft — ours is translatable
             -- via fmtTime(); the base plugin's helper hardcodes English h/m.
             if avg_time and avg_time > 0 then
@@ -919,7 +931,7 @@ function M.build(w, ctx)
                 end
             end
         else
-            prog_left = string.format("%.0f%%", pct * 100)
+            prog_left = prog_left or string.format("%.0f%%", pct * 100)
         end
 
         -- Bold TextWidgets (bookshelf progress region: bold = true)
